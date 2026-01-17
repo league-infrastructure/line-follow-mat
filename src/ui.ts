@@ -41,9 +41,14 @@ export class UIController {
               <div id="selection-indicator" class="pill">Nothing selected</div>
             </div>
             <div class="panel">
+              <div class="panel-title">Segment Info</div>
+              <div id="angle-indicator" class="pill">–</div>
+            </div>
+            <div class="panel">
               <div class="panel-title">Controls</div>
               <ul class="hint-list">
                 <li><span>P</span><span>Toggle point edit mode</span></li>
+                <li><span>S</span><span>Toggle straight lines</span></li>
                 <li><span>Click points</span><span>Draw / extend path</span></li>
                 <li><span>Click segment</span><span>Select segment / path</span></li>
                 <li><span>Esc</span><span>Clear selection</span></li>
@@ -74,6 +79,8 @@ export class UIController {
       text = `Path (${selection.endpoint} endpoint)`
     } else if (selection.kind === 'segment') {
       text = 'Segment selected'
+    } else if (selection.kind === 'point') {
+      text = 'Point selected (Delete to remove)'
     }
 
     el.textContent = text
@@ -83,6 +90,50 @@ export class UIController {
     const el = document.querySelector('#mode-indicator')
     if (!el) return
     el.textContent = pointEditMode ? 'Point Edit Mode' : 'Drawing Mode'
+  }
+
+  updateAngleInfo(x0: number, y0: number, x1: number, y1: number) {
+    const el = document.querySelector('#angle-indicator')
+    if (!el) return
+
+    const dx = x1 - x0
+    const dy = y1 - y0
+    
+    // Calculate distance
+    const distance = Math.sqrt(dx * dx + dy * dy)
+    const distStr = distance.toFixed(1)
+    
+    // Calculate angle
+    let angle = Math.round(Math.atan2(dy, dx) * 180 / Math.PI)
+    // Convert to -179 to 180 range
+    if (angle > 180) angle -= 360
+    
+    // Determine direction
+    const absAngle = angle < 0 ? angle + 360 : angle
+    let direction = ''
+    if (absAngle >= 337.5 || absAngle < 22.5) direction = 'E'
+    else if (absAngle >= 22.5 && absAngle < 67.5) direction = 'SE'
+    else if (absAngle >= 67.5 && absAngle < 112.5) direction = 'S'
+    else if (absAngle >= 112.5 && absAngle < 157.5) direction = 'SW'
+    else if (absAngle >= 157.5 && absAngle < 202.5) direction = 'W'
+    else if (absAngle >= 202.5 && absAngle < 247.5) direction = 'NW'
+    else if (absAngle >= 247.5 && absAngle < 292.5) direction = 'N'
+    else if (absAngle >= 292.5 && absAngle < 337.5) direction = 'NE'
+    
+    // Update content without recreating element
+    const angleStr = angle >= 0 ? `${angle}` : `${angle}`
+    const newContent = `${angleStr}° ${direction} · ${distStr} units`
+    if (el.textContent !== newContent) {
+      el.textContent = newContent
+    }
+  }
+
+  hideAngleInfo() {
+    const el = document.querySelector('#angle-indicator')
+    if (!el) return
+    if (el.textContent !== '–') {
+      el.textContent = '–'
+    }
   }
 
   private bindEvents() {

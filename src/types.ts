@@ -17,8 +17,10 @@ export type SelectionState =
   | { kind: 'floating-point'; point: GridPoint }
   | { kind: 'path'; pathId: string; endpoint: 'start' | 'end' }
   | { kind: 'segment'; pathId: string; segmentIndex: number }
+  | { kind: 'point'; pathId: string; pointIndex: number }
 
 export interface AppState {
   pointEditMode: boolean
+  straightLineMode: boolean
   draggedPoint: { pathId: string; pointIndex: number } | null
 }

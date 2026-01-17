@@ -62,6 +62,20 @@ Lines are drawn with Bezier, and there are constraints on the splines.
 * The curve for each segment must always be the shortest possible between those
   points. 
 
+* If two points are on the same horizontal or vertical line, the
+  segment between those points must be straight beteweeen them. Normal rules
+  about continuity still apply at the end points. 
+
+* If two points are adjacent but on on a horizontal or vertical line, ( they is
+  thet are on a 45 degree line ) then the segment must be a quarter circle. The
+  center of the circle is the third point that is horizontal from one point and
+  vertical from the other. There are two possible circular paths to choose from;
+  pick the one that makes the slope with other points the closest to horizonal
+  or vertical. 
+
+* 
+
+
 ## Editing lines. 
 
 The `P` key will toggle ppint editing mode. In point editing mode, all points

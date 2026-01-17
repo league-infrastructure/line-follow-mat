@@ -20,18 +20,21 @@ interface DrawableSegment {
   p1: Point
   cp1: Point
   cp2: Point
+  isCircularArc?: boolean
+  arcTurnsCounterclockwise?: boolean
 }
 
 export class CanvasView {
   private canvas: HTMLCanvasElement | null = null
   private ctx: CanvasRenderingContext2D | null = null
   private readonly callbacks: CanvasCallbacks
-  private deviceScale = window.devicePixelRatio || 1
+  deviceScale = window.devicePixelRatio || 1
   private origin: Point = { x: 0, y: 0 }
   private gridSpacingPx = 24
   private boardPadding = 48
   private segments: DrawableSegment[] = []
   private lastSelection: SelectionState = { kind: 'none' }
+  private straightLineMode = false
 
   constructor(callbacks: CanvasCallbacks) {
     this.callbacks = callbacks
@@ -49,6 +52,22 @@ export class CanvasView {
     canvasEl.addEventListener('click', (ev) => this.handleClick(ev))
   }
 
+  pickGridPoint(x: number, y: number): GridPoint | null {
+    const gx = Math.round((x / this.deviceScale - this.origin.x) / this.gridSpacingPx)
+    const gy = Math.round((y / this.deviceScale - this.origin.y) / this.gridSpacingPx)
+    if (gx < 0 || gy < 0 || gx >= GRID_POINTS || gy >= GRID_POINTS) return null
+
+    const candidate = this.toCanvasPoint({ x: gx, y: gy })
+    const dx = candidate.x - x / this.deviceScale
+    const dy = candidate.y - y / this.deviceScale
+    const dist = Math.hypot(dx, dy)
+    const tolerance = Math.max(10, this.gridSpacingPx * 0.25)
+    if (dist <= tolerance) {
+      return { x: gx, y: gy }
+    }
+    return null
+  }
+
   render(paths: Path[], selection: SelectionState, pointEditMode = false, draggedPoint: { pathId: string; pointIndex: number } | null = null) {
     if (!this.canvas || !this.ctx) return
 
@@ -60,10 +79,15 @@ export class CanvasView {
     this.paintBackground()
     this.paintGrid()
     this.paintPaths(paths)
+    
+    if (this.straightLineMode) {
+      this.paintSegmentLabels(paths)
+    }
+    
     this.paintSelection(paths, selection)
     
     if (pointEditMode) {
-      this.paintPathPoints(paths, draggedPoint)
+      this.paintPathPoints(paths, draggedPoint, selection)
     }
 
     this.ctx.restore()
@@ -72,6 +96,10 @@ export class CanvasView {
   toDataURL(type: string = 'image/png') {
     if (!this.canvas) return ''
     return this.canvas.toDataURL(type)
+  }
+
+  setStraightLineMode(mode: boolean) {
+    this.straightLineMode = mode
   }
 
   private handleResize() {
@@ -189,9 +217,97 @@ export class CanvasView {
       for (let i = 0; i < segs.length; i++) {
         const s = segs[i]
         if (i === 0) this.ctx.moveTo(s.p0.x, s.p0.y)
-        this.ctx.bezierCurveTo(s.cp1.x, s.cp1.y, s.cp2.x, s.cp2.y, s.p1.x, s.p1.y)
+        
+        if (this.straightLineMode) {
+          // Draw straight line regardless of segment type
+          this.ctx.lineTo(s.p1.x, s.p1.y)
+        } else if (s.isCircularArc) {
+          // Draw a perfect circular arc with C1 continuity
+          // The center is positioned so the radius is perpendicular to both incoming and outgoing directions
+          const dx = s.p1.x - s.p0.x
+          const dy = s.p1.y - s.p0.y
+          
+          // Determine center based on the signs of dx and dy
+          // This ensures the tangent is continuous with the incoming direction
+          let centerX: number
+          let centerY: number
+          
+          if (dx > 0 && dy > 0) {
+            // Right-down: center at (p1.x, p0.y)
+            centerX = s.p1.x
+            centerY = s.p0.y
+          } else if (dx < 0 && dy > 0) {
+            // Left-down: center at (p0.x, p0.y)
+            centerX = s.p0.x
+            centerY = s.p0.y
+          } else if (dx < 0 && dy < 0) {
+            // Left-up: center at (p0.x, p1.y)
+            centerX = s.p0.x
+            centerY = s.p1.y
+          } else {
+            // Right-up: center at (p1.x, p1.y)
+            centerX = s.p1.x
+            centerY = s.p1.y
+          }
+          
+          const radius = Math.abs(dx) // or Math.abs(dy), they're equal for diagonals
+          const startAngle = Math.atan2(s.p0.y - centerY, s.p0.x - centerX)
+          const endAngle = Math.atan2(s.p1.y - centerY, s.p1.x - centerX)
+          
+          // Use the turn direction calculated in buildSegments()
+          const counterclockwise = s.arcTurnsCounterclockwise ?? false
+          
+          this.ctx.arc(centerX, centerY, radius, startAngle, endAngle, counterclockwise)
+        } else {
+          // Draw a bezier curve
+          this.ctx.bezierCurveTo(s.cp1.x, s.cp1.y, s.cp2.x, s.cp2.y, s.p1.x, s.p1.y)
+        }
       }
       this.ctx.stroke()
+    }
+  }
+
+  private paintSegmentLabels(paths: Path[]) {
+    if (!this.ctx) return
+
+    for (const path of paths) {
+      const segs = this.buildSegments(path)
+      
+      for (let i = 0; i < segs.length; i++) {
+        const s = segs[i]
+        const segmentNumber = i + 1
+        
+        // Calculate midpoint of the segment
+        const midX = (s.p0.x + s.p1.x) / 2
+        const midY = (s.p0.y + s.p1.y) / 2
+        
+        // Prepare text
+        const text = String(segmentNumber)
+        
+        // Set up text rendering
+        this.ctx.font = 'bold 14px system-ui'
+        this.ctx.textAlign = 'center'
+        this.ctx.textBaseline = 'middle'
+        
+        // Get text metrics for background sizing
+        const metrics = this.ctx.measureText(text)
+        const textWidth = metrics.width
+        const textHeight = 16
+        const padding = 4
+        
+        // Draw white background
+        this.ctx.fillStyle = 'white'
+        this.ctx.fillRect(
+          midX - textWidth / 2 - padding,
+          midY - textHeight / 2 - padding / 2,
+          textWidth + padding * 2,
+          textHeight + padding
+        )
+        
+        // Draw text
+        this.ctx.fillStyle = '#161616'
+        this.ctx.fillText(text, midX, midY)
+      }
     }
   }
 
@@ -225,7 +341,15 @@ export class CanvasView {
       this.ctx.beginPath()
       this.ctx.moveTo(seg.p0.x, seg.p0.y)
       this.ctx.bezierCurveTo(seg.cp1.x, seg.cp1.y, seg.cp2.x, seg.cp2.y, seg.p1.x, seg.p1.y)
-      thispaintPathPoints(paths: Path[], draggedPoint: { pathId: string; pointIndex: number } | null) {
+      this.ctx.stroke()
+    }
+  }
+
+  private paintPathPoints(
+    paths: Path[], 
+    draggedPoint: { pathId: string; pointIndex: number } | null,
+    selection: SelectionState
+  ) {
     if (!this.ctx) return
 
     for (const path of paths) {
@@ -233,19 +357,26 @@ export class CanvasView {
         const pt = path.points[i]
         const pos = this.toCanvasPoint(pt)
         const isDragged = draggedPoint?.pathId === path.id && draggedPoint?.pointIndex === i
+        const isSelected = selection.kind === 'point' && 
+                          selection.pathId === path.id && 
+                          selection.pointIndex === i
         
-        this.ctx.fillStyle = isDragged ? '#facc15' : '#3b82f6'
-        this.ctx.strokeStyle = '#ffffff'
-        this.ctx.lineWidth = 2
-        this.ctx.beginPath()
-        this.ctx.arc(pos.x, pos.y, isDragged ? 10 : 7, 0, Math.PI * 2)
-        this.ctx.fill()
-        this.ctx.stroke()
+        // Highlight selected or dragged points
+        if (isDragged || isSelected) {
+          this.ctx.fillStyle = isDragged ? '#facc15' : '#3b82f6'
+          this.ctx.strokeStyle = '#ffffff'
+          this.ctx.lineWidth = 2
+          this.ctx.beginPath()
+          this.ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2)
+          this.ctx.fill()
+          this.ctx.stroke()
+        } else {
+          this.ctx.fillStyle = '#cbd5e1'
+          this.ctx.beginPath()
+          this.ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2)
+          this.ctx.fill()
+        }
       }
-    }
-  }
-
-  private .ctx.stroke()
     }
   }
 
@@ -265,35 +396,150 @@ export class CanvasView {
     const segments: DrawableSegment[] = []
     if (pts.length < 2) return segments
 
-    const tension = 0.18 // keeps arcs short while staying C1 continuous
+    // Helper: compute angle between two vectors (in radians)
+    const angleBetween = (v1: Point, v2: Point): number => {
+      const dot = v1.x * v2.x + v1.y * v2.y
+      const det = v1.x * v2.y - v1.y * v2.x
+      return Math.atan2(det, dot)
+    }
+
+    // Helper: normalize vector
+    const normalize = (v: Point): Point => {
+      const len = Math.hypot(v.x, v.y) || 1
+      return { x: v.x / len, y: v.y / len }
+    }
+
+    // Helper: detect sharp corner (threshold: 68-112 degrees)
+    const isSharpCorner = (p0: Point, p1: Point, p2: Point): boolean => {
+      const v1 = normalize({ x: p1.x - p0.x, y: p1.y - p0.y })
+      const v2 = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
+      const angle = Math.abs(angleBetween(v1, v2)) * (180 / Math.PI)
+      return angle >= 68 && angle <= 112
+    }
+
+    // Build segments with directional continuity
+    let currentDirection: Point | null = null
+
+    const isClosedPath = pts.length > 2 && pts[0].x === pts[pts.length - 1].x && pts[0].y === pts[pts.length - 1].y
 
     for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[i === 0 ? i : i - 1]
       const p1 = pts[i]
       const p2 = pts[i + 1]
-      const p3 = pts[i + 2] ?? p2
+      const p0 = i > 0 ? pts[i - 1] : null
+      const p3 = i < pts.length - 2 ? pts[i + 2] : (isClosedPath ? pts[0] : null)
 
-      const cp1 = {
-        x: p1.x + (p2.x - p0.x) * tension,
-        y: p1.y + (p2.y - p0.y) * tension
-      }
-      const cp2 = {
-        x: p2.x - (p3.x - p1.x) * tension,
-        y: p2.y - (p3.y - p1.y) * tension
+      // Check for sharp corner that needs rounding
+      if (p0 && p3 && isSharpCorner(p0, p1, p2)) {
+        // Round the corner - path doesn't go through p1
+        const v1 = normalize({ x: p1.x - p0.x, y: p1.y - p0.y })
+        const v2 = normalize({ x: p3.x - p2.x, y: p2.y - p3.y })
+        
+        // Control points for smooth rounded corner
+        const dist = this.distance(p1, p2) * 0.4
+        const cp1 = { x: p1.x + v1.x * dist, y: p1.y + v1.y * dist }
+        const cp2 = { x: p2.x - v2.x * dist, y: p2.y - v2.y * dist }
+
+        segments.push({
+          pathId: path.id,
+          segmentIndex: i,
+          p0: p1,
+          p1: p2,
+          cp1,
+          cp2
+        })
+
+        currentDirection = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
+        continue
       }
 
-      const maxLen = this.distance(p1, p2) * 0.45
-      const constrainedCp1 = this.clampHandle(p1, cp1, maxLen)
-      const constrainedCp2 = this.clampHandle(p2, cp2, maxLen)
+      // Determine incoming direction
+      if (currentDirection === null) {
+        // First segment: use direction toward second point
+        currentDirection = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
+      }
+
+      // Determine outgoing direction (toward next point)
+      const targetDirection = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
+      
+      // Check for straight or diagonal segments
+      const dx = Math.abs(p2.x - p1.x)
+      const dy = Math.abs(p2.y - p1.y)
+      const isHorizontal = dy < 1
+      const isVertical = dx < 1
+      const isDiagonal = Math.abs(dx - dy) < 2
+
+      let cp1: Point
+      let cp2: Point
+      let shouldBeArc = false
+
+      if (isHorizontal || isVertical) {
+        // Straight line: control points must lie on the segment for perfect straightness
+        const segLen = this.distance(p1, p2)
+        const offset = segLen * 0.33
+        // Place control points on the actual line between p1 and p2
+        const lineDir = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
+        cp1 = { x: p1.x + lineDir.x * offset, y: p1.y + lineDir.y * offset }
+        cp2 = { x: p2.x - lineDir.x * offset, y: p2.y - lineDir.y * offset }
+      } else if (isDiagonal) {
+        // Diagonal: render as arc and determine direction from path curvature
+        // Calculate cross product to determine turn direction
+        let arcCounterclockwise = false
+        if (p0 && p3) {
+          // Cross product of (p1-p0) × (p2-p1)
+          const v1 = { x: p1.x - p0.x, y: p1.y - p0.y }
+          const v2 = { x: p2.x - p1.x, y: p2.y - p1.y }
+          const crossProduct = v1.x * v2.y - v1.y * v2.x
+          // Canvas Y+ downward: invert to treat CW as positive
+          arcCounterclockwise = crossProduct < 0
+        }
+        
+        cp1 = p1
+        cp2 = p2
+        
+        segments.push({
+          pathId: path.id,
+          segmentIndex: i,
+          p0: p1,
+          p1: p2,
+          cp1,
+          cp2,
+          isCircularArc: true,
+          arcTurnsCounterclockwise: arcCounterclockwise
+        })
+        
+        currentDirection = targetDirection
+        continue
+      } else {
+        // General curve with C1 continuity
+        const dist = this.distance(p1, p2) * 0.4
+        cp1 = { x: p1.x + currentDirection.x * dist, y: p1.y + currentDirection.y * dist }
+        
+        // Exit direction at p2
+        if (p3) {
+          const nextDir = normalize({ x: p3.x - p2.x, y: p3.y - p2.y })
+          // Average of incoming and outgoing for smooth transition
+          const exitDir = normalize({ 
+            x: targetDirection.x + nextDir.x, 
+            y: targetDirection.y + nextDir.y 
+          })
+          cp2 = { x: p2.x - exitDir.x * dist, y: p2.y - exitDir.y * dist }
+        } else {
+          cp2 = { x: p2.x - targetDirection.x * dist, y: p2.y - targetDirection.y * dist }
+        }
+      }
 
       segments.push({
         pathId: path.id,
         segmentIndex: i,
         p0: p1,
         p1: p2,
-        cp1: constrainedCp1,
-        cp2: constrainedCp2
+        cp1,
+        cp2,
+        isCircularArc: shouldBeArc
       })
+
+      // Update current direction for next segment
+      currentDirection = targetDirection
     }
 
     return segments
@@ -316,22 +562,6 @@ export class CanvasView {
       x: this.origin.x + point.x * this.gridSpacingPx,
       y: this.origin.y + point.y * this.gridSpacingPx
     }
-  }
-
-  private pickGridPoint(x: number, y: number): GridPoint | null {
-    const gx = Math.round((x / this.deviceScale - this.origin.x) / this.gridSpacingPx)
-    const gy = Math.round((y / this.deviceScale - this.origin.y) / this.gridSpacingPx)
-    if (gx < 0 || gy < 0 || gx >= GRID_POINTS || gy >= GRID_POINTS) return null
-
-    const candidate = this.toCanvasPoint({ x: gx, y: gy })
-    const dx = candidate.x - x / this.deviceScale
-    const dy = candidate.y - y / this.deviceScale
-    const dist = Math.hypot(dx, dy)
-    const tolerance = Math.max(10, this.gridSpacingPx * 0.25)
-    if (dist <= tolerance) {
-      return { x: gx, y: gy }
-    }
-    return null
   }
 
   private pickSegment(x: number, y: number): SegmentHit | null {

@@ -1,0 +1,21 @@
+tests:
+  - name: simple_corner
+    url: http://localhost:5173/?g=000P0o1E1F1G
+    example: test_examples/simple_corner.png
+    net: null
+    description: |
+      2 segments vertical
+      1 CCW arc from North to East
+      2 segments horizontal
+  - name: cw_square
+    url: http://localhost:5173/?g=01020S0r1F1E0o0P01
+    example: null
+    net: null
+    description: |
+      A 3 unit square with rounded corners, clockwise.
+  - name: ccw_square
+    url: http://localhost:5173/?g=02010P0o1E1F0r0S02
+    example: null
+    net: null
+    description: |
+      A 3 unit square with rounded corners, counter-clockwise.
