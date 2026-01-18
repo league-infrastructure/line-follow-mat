@@ -1,5 +1,5 @@
-import { GRID_POINTS, GRID_SPACING_INCHES, LINE_WIDTH_INCHES } from './config'
-import { GridPoint, Path, Point, SelectionState } from './types'
+import { GRID_POINTS, GRID_SPACING_INCHES, LINE_WIDTH_INCHES, LOGO_URL, WEBSITE_URL, SLOGAN, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT } from './config'
+import { GridPoint, Path, Point, SelectionState, Corner } from './types'
 import { drawArrowHead, drawSegmentLabel } from './paths'
 import { drawArc, calculateArcParams } from './arc-utils'
 import { buildSegments, DrawableSegment } from './segment-builder'
@@ -29,9 +29,86 @@ export class CanvasView {
   private previewTarget: GridPoint | null = null
   private suppressNextClick = false
   private buildingPath = false
+  private titleBoxCorner: Corner = 'bottom-right'
+  private logoImage: HTMLImageElement | null = null
+  private qrImage: HTMLImageElement | null = null
+  
+  // Legend position and branding
+  private legendPosition: GridPoint | null = null // null = auto-position, otherwise upper-left grid point
+  private legendManuallyPositioned = false
+  private customLogoUrl: string | null = null
+  private customWebsiteUrl: string | null = null
+  private customSlogan: string | null = null
+  private draggingLegend = false
+  private legendDragOffset = { x: 0, y: 0 }
+  private legendDragPosition: { x: number; y: number } | null = null // Pixel position during drag
+  private onLegendMoved: ((pos: GridPoint) => void) | null = null
+  private legendBounds: { x: number; y: number; width: number; height: number } | null = null
+  private renderCallback: (() => void) | null = null
 
   constructor(callbacks: CanvasCallbacks) {
     this.callbacks = callbacks
+    this.loadImages()
+  }
+
+  private loadImages() {
+    // Load logo
+    this.logoImage = new Image()
+    this.logoImage.crossOrigin = 'anonymous'
+    this.logoImage.src = this.customLogoUrl || LOGO_URL
+    this.logoImage.onload = () => {
+      // Re-render when logo loads
+      if (this.canvas && this.ctx) {
+        // Will be re-rendered on next render call
+      }
+    }
+    
+    // Load QR code from external service
+    const websiteUrl = this.customWebsiteUrl || WEBSITE_URL
+    this.qrImage = new Image()
+    this.qrImage.crossOrigin = 'anonymous'
+    this.qrImage.src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(websiteUrl)}`
+  }
+
+  setLegendMovedCallback(callback: (pos: GridPoint) => void) {
+    this.onLegendMoved = callback
+  }
+
+  setLegendPosition(pos: GridPoint | null, manual: boolean = false) {
+    this.legendPosition = pos
+    this.legendManuallyPositioned = manual
+  }
+
+  getLegendPosition(): GridPoint | null {
+    return this.legendPosition
+  }
+
+  isLegendManuallyPositioned(): boolean {
+    return this.legendManuallyPositioned
+  }
+
+  setCustomBranding(logoUrl: string | null, websiteUrl: string | null, slogan: string | null) {
+    const logoChanged = logoUrl !== this.customLogoUrl
+    const urlChanged = websiteUrl !== this.customWebsiteUrl
+    this.customLogoUrl = logoUrl
+    this.customWebsiteUrl = websiteUrl
+    this.customSlogan = slogan
+    // Reload images if URLs changed
+    if (logoChanged || urlChanged) {
+      this.loadImages()
+    }
+  }
+
+  getCustomBranding(): { logoUrl: string | null; websiteUrl: string | null; slogan: string | null } {
+    return {
+      logoUrl: this.customLogoUrl,
+      websiteUrl: this.customWebsiteUrl,
+      slogan: this.customSlogan
+    }
+  }
+
+  setRenderCallback(callback: () => void) {
+    this.renderCallback = callback
   }
 
   attach(selector = '#board-canvas') {
@@ -46,6 +123,10 @@ export class CanvasView {
 
     window.addEventListener('resize', () => this.handleResize())
     canvasEl.addEventListener('click', (ev) => this.handleClick(ev))
+    canvasEl.addEventListener('mousedown', (ev) => this.handleLegendDragStart(ev))
+    canvasEl.addEventListener('mousemove', (ev) => this.handleLegendDragMove(ev))
+    canvasEl.addEventListener('mouseup', () => this.handleLegendDragEnd())
+    canvasEl.addEventListener('mouseleave', () => this.handleLegendDragEnd())
     
     // Re-render after layout is complete to handle cases where
     // CSS hasn't finished computing dimensions
@@ -57,6 +138,92 @@ export class CanvasView {
     requestAnimationFrame(() => {
       this.resizeToContainer()
     })
+  }
+
+  private isPointInLegend(x: number, y: number): boolean {
+    if (!this.legendBounds) return false
+    const cssX = x / this.deviceScale
+    const cssY = y / this.deviceScale
+    return cssX >= this.legendBounds.x && 
+           cssX <= this.legendBounds.x + this.legendBounds.width &&
+           cssY >= this.legendBounds.y && 
+           cssY <= this.legendBounds.y + this.legendBounds.height
+  }
+
+  private handleLegendDragStart(ev: MouseEvent) {
+    if (!this.canvas) return
+    const rect = this.canvas.getBoundingClientRect()
+    const x = (ev.clientX - rect.left) * this.deviceScale
+    const y = (ev.clientY - rect.top) * this.deviceScale
+    
+    if (this.isPointInLegend(x, y) && this.legendBounds) {
+      this.draggingLegend = true
+      this.legendDragOffset = {
+        x: x / this.deviceScale - this.legendBounds.x,
+        y: y / this.deviceScale - this.legendBounds.y
+      }
+      this.canvas.style.cursor = 'grabbing'
+    }
+  }
+
+  private handleLegendDragMove(ev: MouseEvent) {
+    if (!this.canvas) return
+    const rect = this.canvas.getBoundingClientRect()
+    const x = (ev.clientX - rect.left) * this.deviceScale
+    const y = (ev.clientY - rect.top) * this.deviceScale
+    
+    // Update cursor when hovering over legend
+    if (!this.draggingLegend) {
+      this.canvas.style.cursor = this.isPointInLegend(x, y) ? 'grab' : 'default'
+      return
+    }
+    
+    // Calculate new pixel position while dragging (follows cursor smoothly)
+    const newX = x / this.deviceScale - this.legendDragOffset.x
+    const newY = y / this.deviceScale - this.legendDragOffset.y
+    
+    // Clamp to board bounds
+    const boxWidth = TITLE_BOX_WIDTH * this.gridSpacingPx
+    const boxHeight = TITLE_BOX_HEIGHT * this.gridSpacingPx
+    const minX = this.origin.x
+    const minY = this.origin.y
+    const maxX = this.origin.x + (GRID_POINTS - 1) * this.gridSpacingPx - boxWidth
+    const maxY = this.origin.y + (GRID_POINTS - 1) * this.gridSpacingPx - boxHeight
+    
+    this.legendDragPosition = {
+      x: Math.max(minX, Math.min(maxX, newX)),
+      y: Math.max(minY, Math.min(maxY, newY))
+    }
+    
+    // Trigger re-render to show legend at new position
+    if (this.renderCallback) {
+      this.renderCallback()
+    }
+  }
+
+  private handleLegendDragEnd() {
+    if (!this.canvas) return
+    if (this.draggingLegend && this.legendDragPosition) {
+      // Snap to grid on drop
+      const gridX = Math.round((this.legendDragPosition.x - this.origin.x) / this.gridSpacingPx)
+      const gridY = Math.round((this.legendDragPosition.y - this.origin.y) / this.gridSpacingPx)
+      
+      // Clamp to valid range
+      const maxX = GRID_POINTS - 1 - TITLE_BOX_WIDTH
+      const maxY = GRID_POINTS - 1 - TITLE_BOX_HEIGHT
+      const clampedX = Math.max(0, Math.min(maxX, gridX))
+      const clampedY = Math.max(0, Math.min(maxY, gridY))
+      
+      this.legendPosition = { x: clampedX, y: clampedY }
+      this.legendManuallyPositioned = true
+      this.legendDragPosition = null
+      
+      if (this.onLegendMoved) {
+        this.onLegendMoved(this.legendPosition)
+      }
+    }
+    this.draggingLegend = false
+    this.canvas.style.cursor = 'default'
   }
 
   // Call this to prevent the next click from being processed
@@ -80,18 +247,25 @@ export class CanvasView {
     return null
   }
 
-  render(paths: Path[], selection: SelectionState, draggedPoint: { pathId: string; pointIndex: number } | null = null) {
+  render(paths: Path[], selection: SelectionState, draggedPoint: { pathId: string; pointIndex: number } | null = null, title: string = '') {
     if (!this.canvas || !this.ctx) return
 
     this.lastSelection = selection
     // Track if we're actively building a path (path or floating-point mode)
     this.buildingPath = selection.kind === 'path' || selection.kind === 'floating-point'
     this.resizeToContainer()
+    
+    // Update title box corner based on path positions (only if not manually positioned)
+    if (!this.legendManuallyPositioned) {
+      this.updateTitleBoxCorner(paths)
+    }
+    
     this.ctx.save()
     this.ctx.scale(this.deviceScale, this.deviceScale)
 
     this.paintBackground()
     this.paintGrid()
+    this.paintTitleBox(title)
     this.paintPaths(paths)
     
     if (this.straightLineMode) {
@@ -117,6 +291,36 @@ export class CanvasView {
   toDataURL(type: string = 'image/png') {
     if (!this.canvas) return ''
     return this.canvas.toDataURL(type)
+  }
+
+  getTitleBoxCorner(): Corner {
+    return this.titleBoxCorner
+  }
+
+  getLogoDataURL(): string {
+    if (!this.logoImage || !this.logoImage.complete || this.logoImage.naturalWidth === 0) {
+      return ''
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = this.logoImage.naturalWidth
+    canvas.height = this.logoImage.naturalHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return ''
+    ctx.drawImage(this.logoImage, 0, 0)
+    return canvas.toDataURL('image/png')
+  }
+
+  getQRDataURL(): string {
+    if (!this.qrImage || !this.qrImage.complete || this.qrImage.naturalWidth === 0) {
+      return ''
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = this.qrImage.naturalWidth
+    canvas.height = this.qrImage.naturalHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return ''
+    ctx.drawImage(this.qrImage, 0, 0)
+    return canvas.toDataURL('image/png')
   }
 
   setStraightLineMode(mode: boolean) {
@@ -166,6 +370,11 @@ export class CanvasView {
     const rect = this.canvas.getBoundingClientRect()
     const x = (event.clientX - rect.left) * this.deviceScale
     const y = (event.clientY - rect.top) * this.deviceScale
+
+    // Ignore clicks on the legend (handled by drag)
+    if (this.isPointInLegend(x, y)) {
+      return
+    }
 
     // When building a path, check grid points FIRST so we can close loops
     if (this.buildingPath) {
@@ -238,6 +447,185 @@ export class CanvasView {
         this.ctx.fill()
       }
     }
+  }
+
+  private isCornerOccupied(paths: Path[], corner: Corner): boolean {
+    // Define corner regions based on TITLE_BOX_WIDTH x TITLE_BOX_HEIGHT grid units
+    const boxWidth = TITLE_BOX_WIDTH
+    const boxHeight = TITLE_BOX_HEIGHT
+    let minX: number, maxX: number, minY: number, maxY: number
+    
+    switch (corner) {
+      case 'top-left':
+        minX = 0; maxX = boxWidth; minY = 0; maxY = boxHeight
+        break
+      case 'top-right':
+        minX = GRID_POINTS - 1 - boxWidth; maxX = GRID_POINTS - 1; minY = 0; maxY = boxHeight
+        break
+      case 'bottom-left':
+        minX = 0; maxX = boxWidth; minY = GRID_POINTS - 1 - boxHeight; maxY = GRID_POINTS - 1
+        break
+      case 'bottom-right':
+        minX = GRID_POINTS - 1 - boxWidth; maxX = GRID_POINTS - 1; minY = GRID_POINTS - 1 - boxHeight; maxY = GRID_POINTS - 1
+        break
+    }
+    
+    // Check if any path point is within this corner region
+    for (const path of paths) {
+      for (const point of path.points) {
+        if (point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+
+  private updateTitleBoxCorner(paths: Path[]) {
+    // Order of preference for corners
+    const corners: Corner[] = ['bottom-right', 'bottom-left', 'top-right', 'top-left']
+    
+    // If current corner is free, keep it
+    if (!this.isCornerOccupied(paths, this.titleBoxCorner)) {
+      return
+    }
+    
+    // Find first free corner
+    for (const corner of corners) {
+      if (!this.isCornerOccupied(paths, corner)) {
+        this.titleBoxCorner = corner
+        return
+      }
+    }
+    
+    // If all corners are occupied, stay in current corner
+  }
+
+  private paintTitleBox(title: string) {
+    if (!this.ctx) return
+    
+    const padding = this.gridSpacingPx * 0.2
+    const boxWidth = TITLE_BOX_WIDTH * this.gridSpacingPx
+    const boxHeight = TITLE_BOX_HEIGHT * this.gridSpacingPx
+    
+    // Calculate position - use drag position during drag, then grid position, then corner
+    let boxX: number, boxY: number
+    if (this.legendDragPosition) {
+      // During dragging, use pixel position for smooth movement
+      boxX = this.legendDragPosition.x
+      boxY = this.legendDragPosition.y
+    } else if (this.legendPosition) {
+      boxX = this.origin.x + this.legendPosition.x * this.gridSpacingPx
+      boxY = this.origin.y + this.legendPosition.y * this.gridSpacingPx
+    } else {
+      switch (this.titleBoxCorner) {
+        case 'top-left':
+          boxX = this.origin.x
+          boxY = this.origin.y
+          break
+        case 'top-right':
+          boxX = this.origin.x + (GRID_POINTS - 1) * this.gridSpacingPx - boxWidth
+          boxY = this.origin.y
+          break
+        case 'bottom-left':
+          boxX = this.origin.x
+          boxY = this.origin.y + (GRID_POINTS - 1) * this.gridSpacingPx - boxHeight
+          break
+        case 'bottom-right':
+          boxX = this.origin.x + (GRID_POINTS - 1) * this.gridSpacingPx - boxWidth
+          boxY = this.origin.y + (GRID_POINTS - 1) * this.gridSpacingPx - boxHeight
+          break
+      }
+    }
+    
+    // Store box bounds for hit testing (in CSS pixels)
+    this.legendBounds = { x: boxX, y: boxY, width: boxWidth, height: boxHeight }
+    
+    // Semi-transparent background
+    this.ctx.save()
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+    this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
+    
+    // Add drag indicator border when hovering
+    if (this.draggingLegend) {
+      this.ctx.strokeStyle = '#3b82f6'
+      this.ctx.lineWidth = 2
+      this.ctx.setLineDash([4, 4])
+      this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight)
+      this.ctx.setLineDash([])
+    }
+    
+    let yOffset = boxY + padding
+    
+    // Title at top (if present)
+    if (title) {
+      this.ctx.fillStyle = '#161616'
+      this.ctx.font = `bold ${this.gridSpacingPx * 0.55}px sans-serif`
+      this.ctx.textAlign = 'center'
+      yOffset += this.gridSpacingPx * 0.45
+      this.ctx.fillText(title, boxX + boxWidth / 2, yOffset, boxWidth - padding * 2)
+      yOffset += padding * 1.0  // Double the space after title
+    }
+    
+    // Row with logo on left, QR+URL on right
+    const logoRowY = yOffset
+    const contentUsed = yOffset - boxY  // How much vertical space we've used so far
+    const logoHeight = boxHeight - contentUsed - padding - this.gridSpacingPx * 0.5  // Space for slogan
+    
+    // Draw logo on left
+    if (this.logoImage && this.logoImage.complete && this.logoImage.naturalWidth > 0) {
+      const logoMaxWidth = boxWidth * 0.55
+      const logoMaxHeight = logoHeight
+      const logoAspect = this.logoImage.naturalWidth / this.logoImage.naturalHeight
+      
+      let lw = logoMaxWidth
+      let lh = lw / logoAspect
+      if (lh > logoMaxHeight) {
+        lh = logoMaxHeight
+        lw = lh * logoAspect
+      }
+      
+      this.ctx.drawImage(this.logoImage, boxX + padding, logoRowY, lw, lh)
+    }
+    
+    // Draw QR code on right with URL below
+    if (this.qrImage && this.qrImage.complete && this.qrImage.naturalWidth > 0) {
+      const qrSize = logoHeight * 0.75
+      const qrX = boxX + boxWidth - qrSize - padding
+      this.ctx.drawImage(this.qrImage, qrX, logoRowY, qrSize, qrSize)
+      
+      // URL below QR code - scale to fit within QR width
+      this.ctx.fillStyle = '#333333'
+      let urlFontSize = this.gridSpacingPx * 0.25
+      this.ctx.font = `${urlFontSize}px sans-serif`
+      const websiteUrl = this.customWebsiteUrl || WEBSITE_URL
+      const urlText = websiteUrl.replace('https://', '').replace('http://', '')
+      const urlMeasured = this.ctx.measureText(urlText).width
+      if (urlMeasured > qrSize) {
+        urlFontSize = urlFontSize * (qrSize / urlMeasured)
+        this.ctx.font = `${urlFontSize}px sans-serif`
+      }
+      this.ctx.textAlign = 'center'
+      this.ctx.fillText(urlText, qrX + qrSize / 2, logoRowY + qrSize + this.gridSpacingPx * 0.28)
+    }
+    
+    // Slogan at bottom spanning full width
+    const slogan = this.customSlogan || SLOGAN
+    const sloganY = boxY + boxHeight - padding
+    this.ctx.fillStyle = '#666666'
+    // Scale font to fit
+    const maxSloganWidth = boxWidth - padding * 2
+    let sloganFontSize = this.gridSpacingPx * 0.32
+    this.ctx.font = `italic ${sloganFontSize}px sans-serif`
+    const measuredWidth = this.ctx.measureText(slogan).width
+    if (measuredWidth > maxSloganWidth) {
+      sloganFontSize = sloganFontSize * (maxSloganWidth / measuredWidth)
+      this.ctx.font = `italic ${sloganFontSize}px sans-serif`
+    }
+    this.ctx.textAlign = 'center'
+    this.ctx.fillText(slogan, boxX + boxWidth / 2, sloganY)
+    
+    this.ctx.restore()
   }
 
   private paintPaths(paths: Path[]) {

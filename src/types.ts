@@ -12,6 +12,9 @@ export type PointIconType = 'play' | 'fastforward' | 'stop' | 'caution' | 'circl
 // Icon placement on a specific point (keyed by pointIndex)
 export type PointIcons = Map<number, PointIconType>
 
+// Corner positions for the title box
+export type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
 export interface Path {
   id: string
   points: GridPoint[]

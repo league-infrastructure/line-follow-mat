@@ -1,5 +1,6 @@
 import type { LineFollowerApp } from './app'
 import type { SelectionState, PointIconType } from './types'
+import { LOGO_URL, WEBSITE_URL, SLOGAN } from './config'
 
 export class UIController {
   private app: LineFollowerApp
@@ -29,6 +30,7 @@ export class UIController {
             <button id="share-btn" class="btn ghost">Share</button>
             <button id="pdf-btn" class="btn ghost">PDF</button>
             <button id="png-btn" class="btn ghost">PNG</button>
+            <button id="svg-btn" class="btn ghost">SVG</button>
           </div>
         </header>
 
@@ -53,7 +55,25 @@ export class UIController {
                 <li><span>Space</span><span>Flip start/end</span></li>
                 <li><span>A</span><span>Add point to segment</span></li>
                 <li><span>Delete or D</span><span>Delete selection</span></li>
+                <li><span>Drag legend</span><span>Move to new position</span></li>
               </ul>
+            </div>
+            <div class="panel">
+              <div class="panel-title">Branding</div>
+              <div class="branding-inputs">
+                <label>
+                  <span>Logo URL</span>
+                  <input type="text" id="logo-url" class="branding-input" placeholder="${LOGO_URL}" />
+                </label>
+                <label>
+                  <span>Website URL</span>
+                  <input type="text" id="website-url" class="branding-input" placeholder="${WEBSITE_URL}" />
+                </label>
+                <label>
+                  <span>Slogan</span>
+                  <input type="text" id="slogan" class="branding-input" placeholder="${SLOGAN}" />
+                </label>
+              </div>
             </div>
           </aside>
 
@@ -204,6 +224,22 @@ export class UIController {
     }
   }
 
+  setBranding(logoUrl: string, websiteUrl: string, slogan: string) {
+    const logoInput = document.querySelector<HTMLInputElement>('#logo-url')
+    const websiteInput = document.querySelector<HTMLInputElement>('#website-url')
+    const sloganInput = document.querySelector<HTMLInputElement>('#slogan')
+    
+    if (logoInput && logoUrl !== LOGO_URL) {
+      logoInput.value = logoUrl
+    }
+    if (websiteInput && websiteUrl !== WEBSITE_URL) {
+      websiteInput.value = websiteUrl
+    }
+    if (sloganInput && slogan !== SLOGAN) {
+      sloganInput.value = slogan
+    }
+  }
+
   private bindEvents() {
     document.getElementById('clear-btn')?.addEventListener('click', () => {
       if (confirm('Clear all lines?')) {
@@ -223,9 +259,29 @@ export class UIController {
       this.app.downloadPNG()
     })
 
+    document.getElementById('svg-btn')?.addEventListener('click', () => {
+      this.app.downloadSVG()
+    })
+
     document.getElementById('board-title')?.addEventListener('input', (e) => {
       const input = e.target as HTMLInputElement
       this.app.setTitle(input.value)
+    })
+
+    // Branding inputs
+    document.getElementById('logo-url')?.addEventListener('change', (e) => {
+      const input = e.target as HTMLInputElement
+      this.app.setLogoUrl(input.value || LOGO_URL)
+    })
+
+    document.getElementById('website-url')?.addEventListener('change', (e) => {
+      const input = e.target as HTMLInputElement
+      this.app.setWebsiteUrl(input.value || WEBSITE_URL)
+    })
+
+    document.getElementById('slogan')?.addEventListener('change', (e) => {
+      const input = e.target as HTMLInputElement
+      this.app.setSlogan(input.value || SLOGAN)
     })
   }
 }

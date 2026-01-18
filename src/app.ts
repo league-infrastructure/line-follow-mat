@@ -1,8 +1,25 @@
 import { CanvasView, SegmentHit } from './canvas'
 import { UIController } from './ui'
 import { GridPoint, Path, SelectionState } from './types'
+import { BOARD_INCHES, GRID_SPACING_INCHES, GRID_POINTS, LINE_WIDTH_INCHES, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT, WEBSITE_URL, SLOGAN, LOGO_URL } from './config'
+import { buildSegments } from './segment-builder'
+import { calculateArcParams } from './arc-utils'
 
 type Endpoint = 'start' | 'end'
+
+// Base62 encoding utilities
+const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+const pointToIndex = (pt: GridPoint): number => pt.y * GRID_POINTS + pt.x
+const indexToPoint = (idx: number): GridPoint => ({ x: idx % GRID_POINTS, y: Math.floor(idx / GRID_POINTS) })
+const indexToBase62 = (n: number): string => {
+  const high = Math.floor(n / 62)
+  const low = n % 62
+  return BASE62[high] + BASE62[low]
+}
+const base62ToIndex = (s: string): number => {
+  if (s.length < 2) return -1
+  return BASE62.indexOf(s[0]) * 62 + BASE62.indexOf(s[1])
+}
 
 export class LineFollowerApp {
   private ui: UIController
@@ -14,6 +31,11 @@ export class LineFollowerApp {
   private pendingPointClick: { pathId: string; pointIndex: number; startX: number; startY: number } | null = null
   private didDrag = false
   private title = ''
+  
+  // Custom branding
+  private customLogoUrl: string | null = null
+  private customWebsiteUrl: string | null = null
+  private customSlogan: string | null = null
 
   constructor() {
     this.ui = new UIController(this)
@@ -21,6 +43,16 @@ export class LineFollowerApp {
       onPoint: (pt) => this.handlePointClick(pt),
       onSegment: (hit) => this.handleSegmentClick(hit),
       onBackground: () => this.clearSelection()
+    })
+    
+    // Listen for legend position changes
+    this.canvas.setLegendMovedCallback(() => {
+      this.render() // Re-render to show new position
+    })
+    
+    // Set up render callback for smooth legend dragging
+    this.canvas.setRenderCallback(() => {
+      this.render()
     })
   }
 
@@ -38,6 +70,37 @@ export class LineFollowerApp {
     requestAnimationFrame(() => this.render())
   }
 
+  // Branding setters
+  setLogoUrl(url: string) {
+    this.customLogoUrl = url === LOGO_URL ? null : url
+    this.canvas.setCustomBranding(this.customLogoUrl, this.customWebsiteUrl, this.customSlogan)
+    this.render()
+  }
+
+  setWebsiteUrl(url: string) {
+    this.customWebsiteUrl = url === WEBSITE_URL ? null : url
+    this.canvas.setCustomBranding(this.customLogoUrl, this.customWebsiteUrl, this.customSlogan)
+    this.render()
+  }
+
+  setSlogan(slogan: string) {
+    this.customSlogan = slogan === SLOGAN ? null : slogan
+    this.canvas.setCustomBranding(this.customLogoUrl, this.customWebsiteUrl, this.customSlogan)
+    this.render()
+  }
+
+  getLogoUrl(): string {
+    return this.customLogoUrl || LOGO_URL
+  }
+
+  getWebsiteUrl(): string {
+    return this.customWebsiteUrl || WEBSITE_URL
+  }
+
+  getSlogan(): string {
+    return this.customSlogan || SLOGAN
+  }
+
   clearAll() {
     this.paths = []
     this.selection = { kind: 'none' }
@@ -45,36 +108,273 @@ export class LineFollowerApp {
   }
 
   async downloadPDF() {
-    const dataUrl = this.canvas.toDataURL('image/png')
+    // Create high-res canvas from SVG for 48"x48" at 150 DPI
+    const dpi = 150
+    const sizeInches = BOARD_INCHES
+    const sizePx = sizeInches * dpi  // 7200px
+    
+    const dataUrl = await this.renderSVGToDataURL(sizePx)
+    
     const { jsPDF } = await import('jspdf')
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' })
-    const props = doc.getImageProperties(dataUrl)
-    const pageW = doc.internal.pageSize.getWidth()
-    const pageH = doc.internal.pageSize.getHeight()
-    const margin = 36
-    const usableW = pageW - margin * 2
-    const usableH = pageH - margin * 2
-    const ratio = Math.min(usableW / props.width, usableH / props.height)
+    // Create PDF at 48"x48" (points = inches * 72)
+    const sizePoints = sizeInches * 72  // 3456 points
+    const doc = new jsPDF({ 
+      orientation: 'portrait', 
+      unit: 'pt', 
+      format: [sizePoints, sizePoints] 
+    })
 
     doc.addImage(
       dataUrl,
       'PNG',
-      margin,
-      margin,
-      props.width * ratio,
-      props.height * ratio,
+      0,
+      0,
+      sizePoints,
+      sizePoints,
       undefined,
       'FAST'
     )
     doc.save('line-follower-board.pdf')
   }
 
-  downloadPNG() {
-    const url = this.canvas.toDataURL('image/png')
+  async downloadPNG() {
+    // Render at 150 DPI for 48"x48" = 7200x7200 pixels
+    const dpi = 150
+    const sizePx = BOARD_INCHES * dpi  // 7200px
+    
+    const dataUrl = await this.renderSVGToDataURL(sizePx)
+    
     const link = document.createElement('a')
-    link.href = url
+    link.href = dataUrl
     link.download = 'line-follower-board.png'
     link.click()
+  }
+
+  private renderSVGToDataURL(sizePx: number): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const svg = this.generateSVG()
+      const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = sizePx
+        canvas.height = sizePx
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          URL.revokeObjectURL(url)
+          reject(new Error('Could not get canvas context'))
+          return
+        }
+        
+        // White background
+        ctx.fillStyle = 'white'
+        ctx.fillRect(0, 0, sizePx, sizePx)
+        
+        // Draw SVG
+        ctx.drawImage(img, 0, 0, sizePx, sizePx)
+        
+        URL.revokeObjectURL(url)
+        resolve(canvas.toDataURL('image/png'))
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('Failed to load SVG'))
+      }
+      img.src = url
+    })
+  }
+
+  downloadSVG() {
+    const svg = this.generateSVG()
+    const blob = new Blob([svg], { type: 'image/svg+xml' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'line-follower-board.svg'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  private generateSVG(): string {
+    // Full size: 48" x 48"
+    // Using inches directly with viewBox
+    const boardSize = BOARD_INCHES
+    const gridSpacing = GRID_SPACING_INCHES
+    const lineWidth = LINE_WIDTH_INCHES
+    
+    // Convert grid point to SVG coordinates (in inches)
+    const toSvgPoint = (p: { x: number; y: number }) => ({
+      x: p.x * gridSpacing,
+      y: p.y * gridSpacing
+    })
+    
+    let pathsD = ''
+    
+    for (const path of this.paths) {
+      const segs = buildSegments(path, toSvgPoint)
+      
+      if (segs.length === 0) continue
+      
+      // Start the path
+      pathsD += `M ${segs[0].p0.x} ${segs[0].p0.y} `
+      
+      for (const seg of segs) {
+        if (seg.isCircularArc) {
+          // Draw as arc
+          const counterclockwise = seg.arcTurnsCounterclockwise ?? false
+          const arc = calculateArcParams(seg.p0.x, seg.p0.y, seg.p1.x, seg.p1.y, counterclockwise)
+          const largeArcFlag = 0 // Our arcs are always less than 180°
+          const sweepFlag = counterclockwise ? 0 : 1
+          pathsD += `A ${arc.radius} ${arc.radius} 0 ${largeArcFlag} ${sweepFlag} ${seg.p1.x} ${seg.p1.y} `
+        } else {
+          // Draw as bezier curve
+          pathsD += `C ${seg.cp1.x} ${seg.cp1.y} ${seg.cp2.x} ${seg.cp2.y} ${seg.p1.x} ${seg.p1.y} `
+        }
+      }
+    }
+    
+    // Generate title box SVG
+    const titleBoxSvg = this.generateTitleBoxSVG(gridSpacing)
+    
+    // Build SVG with border and paths
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" 
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="${boardSize}in" 
+     height="${boardSize}in" 
+     viewBox="0 0 ${boardSize} ${boardSize}">
+  <!-- Line Follower Board - ${boardSize}" x ${boardSize}" at ${gridSpacing}" grid spacing -->
+  
+  <!-- White background -->
+  <rect x="0" y="0" width="${boardSize}" height="${boardSize}" fill="white"/>
+  
+  <!-- Border for scaling reference -->
+  <rect x="0" y="0" width="${boardSize}" height="${boardSize}" 
+        fill="none" stroke="black" stroke-width="0.05"/>
+  
+  <!-- Grid dots -->
+  <g fill="#cccccc">
+${Array.from({ length: GRID_POINTS }, (_, y) =>
+  Array.from({ length: GRID_POINTS }, (_, x) =>
+    `    <circle cx="${x * gridSpacing}" cy="${y * gridSpacing}" r="0.04"/>`
+  ).join('\n')
+).join('\n')}
+  </g>
+  
+  ${titleBoxSvg}
+  
+  <!-- Paths -->
+  <path d="${pathsD}" 
+        fill="none" 
+        stroke="black" 
+        stroke-width="${lineWidth}" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"/>
+</svg>`
+    
+    return svg
+  }
+
+  private generateTitleBoxSVG(gridSpacing: number): string {
+    const legendPos = this.canvas.getLegendPosition()
+    const padding = gridSpacing * 0.2
+    const boxWidth = TITLE_BOX_WIDTH * gridSpacing
+    const boxHeight = TITLE_BOX_HEIGHT * gridSpacing
+    
+    // Calculate position - use manual position if set, otherwise use corner
+    let boxX: number, boxY: number
+    if (legendPos) {
+      boxX = legendPos.x * gridSpacing
+      boxY = legendPos.y * gridSpacing
+    } else {
+      const corner = this.canvas.getTitleBoxCorner()
+      switch (corner) {
+        case 'top-left':
+          boxX = 0
+          boxY = 0
+          break
+        case 'top-right':
+          boxX = (GRID_POINTS - 1) * gridSpacing - boxWidth
+          boxY = 0
+          break
+        case 'bottom-left':
+          boxX = 0
+          boxY = (GRID_POINTS - 1) * gridSpacing - boxHeight
+          break
+        case 'bottom-right':
+        default:
+          boxX = (GRID_POINTS - 1) * gridSpacing - boxWidth
+          boxY = (GRID_POINTS - 1) * gridSpacing - boxHeight
+          break
+      }
+    }
+    
+    // Get embedded image data URIs
+    const logoDataURL = this.canvas.getLogoDataURL()
+    const qrDataURL = this.canvas.getQRDataURL()
+    
+    const websiteUrl = this.customWebsiteUrl || WEBSITE_URL
+    const slogan = this.customSlogan || SLOGAN
+    const urlText = websiteUrl.replace('https://', '').replace('http://', '')
+    const titleFontSize = gridSpacing * 0.55
+    const sloganFontSize = gridSpacing * 0.28
+    const urlFontSize = gridSpacing * 0.25
+    
+    let yOffset = boxY + padding
+    let titleSvg = ''
+    if (this.title) {
+      yOffset += gridSpacing * 0.45
+      titleSvg = `<text x="${boxX + boxWidth / 2}" y="${yOffset}" 
+          font-family="sans-serif" font-size="${titleFontSize}" font-weight="bold" fill="#161616" text-anchor="middle">${this.escapeXml(this.title)}</text>`
+      yOffset += padding * 1.0  // Double the space after title
+    }
+    
+    const logoRowY = yOffset
+    const contentUsed = yOffset - boxY  // How much vertical space we've used so far
+    const logoHeight = boxHeight - contentUsed - padding - gridSpacing * 0.5  // Space for slogan
+    const logoWidth = boxWidth * 0.55
+    const qrSize = logoHeight * 0.75
+    const qrX = boxX + boxWidth - qrSize - padding
+    const sloganY = boxY + boxHeight - padding
+    
+    return `<!-- Title Box -->
+  <g>
+    <!-- Background -->
+    <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" fill="rgba(255, 255, 255, 0.9)"/>
+    
+    <!-- Title -->
+    ${titleSvg}
+    
+    <!-- Logo -->
+    ${logoDataURL ? `<image x="${boxX + padding}" y="${logoRowY}" 
+           width="${logoWidth}" height="${logoHeight}"
+           href="${logoDataURL}" preserveAspectRatio="xMinYMin meet"/>` : ''}
+    
+    <!-- QR Code -->
+    ${qrDataURL ? `<image x="${qrX}" y="${logoRowY}" 
+           width="${qrSize}" height="${qrSize}"
+           href="${qrDataURL}"/>` : ''}
+    
+    <!-- URL below QR -->
+    <text x="${qrX + qrSize / 2}" y="${logoRowY + qrSize + urlFontSize * 1.1}" 
+          font-family="sans-serif" font-size="${urlFontSize}" fill="#333333" text-anchor="middle"
+          textLength="${qrSize}" lengthAdjust="spacingAndGlyphs">${urlText}</text>
+    
+    <!-- Slogan at bottom spanning full width -->
+    <text x="${boxX + boxWidth / 2}" y="${sloganY}" 
+          font-family="sans-serif" font-size="${sloganFontSize}" font-style="italic" fill="#666666" text-anchor="middle">${slogan}</text>
+  </g>`
+  }
+
+  private escapeXml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;')
   }
 
   setTitle(title: string) {
@@ -91,6 +391,21 @@ export class LineFollowerApp {
     params.set('g', encoded)
     if (this.title) {
       params.set('t', this.title)
+    }
+    // Add legend position if manually set
+    const legendPos = this.canvas.getLegendPosition()
+    if (this.canvas.isLegendManuallyPositioned() && legendPos) {
+      params.set('l', indexToBase62(pointToIndex(legendPos)))
+    }
+    // Add custom branding only if different from defaults
+    if (this.customLogoUrl) {
+      params.set('i', this.customLogoUrl)
+    }
+    if (this.customWebsiteUrl) {
+      params.set('u', this.customWebsiteUrl)
+    }
+    if (this.customSlogan) {
+      params.set('s', this.customSlogan)
     }
     const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`
     const newUrl = `${window.location.pathname}?${params.toString()}`
@@ -601,7 +916,7 @@ export class LineFollowerApp {
   }
 
   private render() {
-    this.canvas.render(this.paths, this.selection, this.draggedPoint)
+    this.canvas.render(this.paths, this.selection, this.draggedPoint, this.title)
     this.ui.updateSelection(this.selection)
     
     // Update angle info for segments and floating points
@@ -628,6 +943,11 @@ export class LineFollowerApp {
     const params = new URLSearchParams(window.location.search)
     const encoded = params.get('g')
     const title = params.get('t')
+    const legendPosEncoded = params.get('l')
+    const logoUrl = params.get('i')
+    const websiteUrl = params.get('u')
+    const slogan = params.get('s')
+    
     if (encoded) {
       this.loadDesign(encoded)
     }
@@ -635,5 +955,37 @@ export class LineFollowerApp {
       this.title = title
       this.ui.setTitle(title)
     }
+    
+    // Restore legend position
+    if (legendPosEncoded) {
+      const idx = base62ToIndex(legendPosEncoded)
+      if (idx >= 0) {
+        const pos = indexToPoint(idx)
+        this.canvas.setLegendPosition(pos, true) // manually positioned
+      }
+    }
+    
+    // Restore custom branding
+    if (logoUrl) {
+      this.customLogoUrl = logoUrl
+    }
+    if (websiteUrl) {
+      this.customWebsiteUrl = websiteUrl
+    }
+    if (slogan) {
+      this.customSlogan = slogan
+    }
+    
+    // Apply branding to canvas
+    if (this.customLogoUrl || this.customWebsiteUrl || this.customSlogan) {
+      this.canvas.setCustomBranding(this.customLogoUrl, this.customWebsiteUrl, this.customSlogan)
+    }
+    
+    // Update UI with branding values
+    this.ui.setBranding(
+      this.customLogoUrl || LOGO_URL,
+      this.customWebsiteUrl || WEBSITE_URL,
+      this.customSlogan || SLOGAN
+    )
   }
 }
