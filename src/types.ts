@@ -1,7 +1,3 @@
-export const BOARD_INCHES = 48
-export const GRID_SPACING_INCHES = 2
-export const GRID_POINTS = BOARD_INCHES / GRID_SPACING_INCHES + 1 // 25 points across and down
-
 export interface GridPoint {
   x: number
   y: number
@@ -10,9 +6,16 @@ export interface GridPoint {
 // Alias for GridPoint for use in canvas coordinate contexts
 export type Point = GridPoint
 
+// Icon types that can be placed on path points
+export type PointIconType = 'play' | 'fastforward' | 'stop' | 'caution' | 'circle' | 'square' | null
+
+// Icon placement on a specific point (keyed by pointIndex)
+export type PointIcons = Map<number, PointIconType>
+
 export interface Path {
   id: string
   points: GridPoint[]
+  icons?: PointIcons  // Map from point index to icon type
 }
 
 export type SelectionState =
@@ -23,7 +26,6 @@ export type SelectionState =
   | { kind: 'point'; pathId: string; pointIndex: number }
 
 export interface AppState {
-  pointEditMode: boolean
   straightLineMode: boolean
   draggedPoint: { pathId: string; pointIndex: number } | null
 }

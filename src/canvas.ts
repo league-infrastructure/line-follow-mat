@@ -1,6 +1,7 @@
-import { GRID_POINTS, GridPoint, Path, Point, SelectionState } from './types'
+import { GRID_POINTS, GRID_SPACING_INCHES, LINE_WIDTH_INCHES } from './config'
+import { GridPoint, Path, Point, SelectionState } from './types'
 import { drawArrowHead, drawSegmentLabel } from './paths'
-import { drawArc } from './arc-utils'
+import { drawArc, calculateArcParams } from './arc-utils'
 import { buildSegments, DrawableSegment } from './segment-builder'
 
 export interface SegmentHit {
@@ -25,6 +26,8 @@ export class CanvasView {
   private segments: DrawableSegment[] = []
   private lastSelection: SelectionState = { kind: 'none' }
   private straightLineMode = false
+  private previewTarget: GridPoint | null = null
+  private suppressNextClick = false
 
   constructor(callbacks: CanvasCallbacks) {
     this.callbacks = callbacks
@@ -40,6 +43,11 @@ export class CanvasView {
 
     window.addEventListener('resize', () => this.handleResize())
     canvasEl.addEventListener('click', (ev) => this.handleClick(ev))
+  }
+
+  // Call this to prevent the next click from being processed
+  suppressClick() {
+    this.suppressNextClick = true
   }
 
   pickGridPoint(x: number, y: number): GridPoint | null {
@@ -58,7 +66,7 @@ export class CanvasView {
     return null
   }
 
-  render(paths: Path[], selection: SelectionState, pointEditMode = false, draggedPoint: { pathId: string; pointIndex: number } | null = null) {
+  render(paths: Path[], selection: SelectionState, draggedPoint: { pathId: string; pointIndex: number } | null = null) {
     if (!this.canvas || !this.ctx) return
 
     this.lastSelection = selection
@@ -69,14 +77,19 @@ export class CanvasView {
     this.paintBackground()
     this.paintGrid()
     this.paintPaths(paths)
+    this.paintIcons(paths)
     
     if (this.straightLineMode) {
       this.paintSegmentLabels(paths)
     }
     
+    // Paint preview segment when hovering to add a new point
+    this.paintPreviewSegment(paths, selection)
+    
     this.paintSelection(paths, selection)
     
-    if (pointEditMode) {
+    // Show path points when a segment, path, or point is selected
+    if (selection.kind === 'segment' || selection.kind === 'path' || selection.kind === 'point') {
       this.paintPathPoints(paths, draggedPoint, selection)
     }
 
@@ -90,6 +103,10 @@ export class CanvasView {
 
   setStraightLineMode(mode: boolean) {
     this.straightLineMode = mode
+  }
+
+  setPreviewTarget(point: GridPoint | null) {
+    this.previewTarget = point
   }
 
   private handleResize() {
@@ -122,19 +139,28 @@ export class CanvasView {
   private handleClick(event: MouseEvent) {
     if (!this.canvas) return
 
+    // If click was suppressed (e.g., point was clicked in app.ts), skip processing
+    if (this.suppressNextClick) {
+      this.suppressNextClick = false
+      return
+    }
+
     const rect = this.canvas.getBoundingClientRect()
     const x = (event.clientX - rect.left) * this.deviceScale
     const y = (event.clientY - rect.top) * this.deviceScale
 
-    const pointHit = this.pickGridPoint(x, y)
-    if (pointHit) {
-      this.callbacks.onPoint(pointHit)
-      return
-    }
-
+    // Check for segment hit FIRST - prioritize selecting existing paths over creating new points
+    // This makes it much easier to click on segments without accidentally creating new points
     const segmentHit = this.pickSegment(x, y)
     if (segmentHit) {
       this.callbacks.onSegment(segmentHit)
+      return
+    }
+
+    // Only check for grid point if no segment was clicked
+    const pointHit = this.pickGridPoint(x, y)
+    if (pointHit) {
+      this.callbacks.onPoint(pointHit)
       return
     }
 
@@ -198,8 +224,17 @@ export class CanvasView {
         this.lastSelection.kind === 'path' && this.lastSelection.pathId === path.id
       const pathColor = isPathSelected ? '#e24a4a' : '#161616'
 
+      // Use thin lines in straight mode, proportional width in curve mode
+      let lineWidth: number
+      if (this.straightLineMode) {
+        lineWidth = isPathSelected ? 3.5 : 3
+      } else {
+        // Calculate proportional line width: LINE_WIDTH_INCHES relative to grid spacing
+        const lineWidthPx = (LINE_WIDTH_INCHES / GRID_SPACING_INCHES) * this.gridSpacingPx
+        lineWidth = isPathSelected ? lineWidthPx * 1.15 : lineWidthPx
+      }
       this.ctx.strokeStyle = pathColor
-      this.ctx.lineWidth = isPathSelected ? 3.5 : 3
+      this.ctx.lineWidth = lineWidth
       this.ctx.lineJoin = 'round'
       this.ctx.lineCap = 'round'
 
@@ -232,6 +267,112 @@ export class CanvasView {
     }
   }
 
+  private paintIcons(paths: Path[]) {
+    if (!this.ctx) return
+
+    for (const path of paths) {
+      if (!path.icons) continue
+      
+      for (const [pointIndex, iconType] of path.icons) {
+        if (!iconType || pointIndex >= path.points.length) continue
+        
+        const point = path.points[pointIndex]
+        const pos = this.toCanvasPoint(point)
+        this.drawIcon(pos.x, pos.y, iconType)
+      }
+    }
+  }
+
+  private drawIcon(x: number, y: number, iconType: import('./types').PointIconType) {
+    if (!this.ctx || !iconType) return
+    
+    // Icon size fills most of a grid cell
+    const size = this.gridSpacingPx * 0.8
+    const halfSize = size / 2
+    
+    // Draw white shadow/outline first
+    this.ctx.save()
+    this.ctx.shadowColor = 'rgba(255, 255, 255, 0.9)'
+    this.ctx.shadowBlur = 8
+    this.ctx.shadowOffsetX = 0
+    this.ctx.shadowOffsetY = 0
+    
+    this.ctx.fillStyle = '#161616'
+    this.ctx.strokeStyle = '#161616'
+    this.ctx.lineWidth = 2
+    this.ctx.lineCap = 'round'
+    this.ctx.lineJoin = 'round'
+    
+    switch (iconType) {
+      case 'play':
+        // Right-pointing triangle (play button)
+        this.ctx.beginPath()
+        this.ctx.moveTo(x - halfSize * 0.4, y - halfSize * 0.7)
+        this.ctx.lineTo(x + halfSize * 0.6, y)
+        this.ctx.lineTo(x - halfSize * 0.4, y + halfSize * 0.7)
+        this.ctx.closePath()
+        this.ctx.fill()
+        break
+        
+      case 'fastforward':
+        // Double triangles (fast forward)
+        this.ctx.beginPath()
+        this.ctx.moveTo(x - halfSize * 0.7, y - halfSize * 0.5)
+        this.ctx.lineTo(x - halfSize * 0.1, y)
+        this.ctx.lineTo(x - halfSize * 0.7, y + halfSize * 0.5)
+        this.ctx.closePath()
+        this.ctx.fill()
+        
+        this.ctx.beginPath()
+        this.ctx.moveTo(x + halfSize * 0.1, y - halfSize * 0.5)
+        this.ctx.lineTo(x + halfSize * 0.7, y)
+        this.ctx.lineTo(x + halfSize * 0.1, y + halfSize * 0.5)
+        this.ctx.closePath()
+        this.ctx.fill()
+        break
+        
+      case 'stop':
+        // Octagon (stop sign shape)
+        const octRadius = halfSize * 0.75
+        this.ctx.beginPath()
+        for (let i = 0; i < 8; i++) {
+          const angle = (i * Math.PI / 4) - Math.PI / 8
+          const px = x + Math.cos(angle) * octRadius
+          const py = y + Math.sin(angle) * octRadius
+          if (i === 0) this.ctx.moveTo(px, py)
+          else this.ctx.lineTo(px, py)
+        }
+        this.ctx.closePath()
+        this.ctx.fill()
+        break
+        
+      case 'caution':
+        // Triangle pointing up (warning/caution)
+        this.ctx.beginPath()
+        this.ctx.moveTo(x, y - halfSize * 0.7)
+        this.ctx.lineTo(x + halfSize * 0.7, y + halfSize * 0.5)
+        this.ctx.lineTo(x - halfSize * 0.7, y + halfSize * 0.5)
+        this.ctx.closePath()
+        this.ctx.fill()
+        break
+        
+      case 'circle':
+        // Filled circle
+        this.ctx.beginPath()
+        this.ctx.arc(x, y, halfSize * 0.6, 0, Math.PI * 2)
+        this.ctx.fill()
+        break
+        
+      case 'square':
+        // Filled square
+        const sqSize = halfSize * 0.6
+        this.ctx.fillRect(x - sqSize, y - sqSize, sqSize * 2, sqSize * 2)
+        break
+    }
+    
+    this.ctx.restore()
+  }
+
   private paintSegmentLabels(paths: Path[]) {
     if (!this.ctx) return
 
@@ -245,6 +386,112 @@ export class CanvasView {
         // Use shared drawing function from paths.ts
         drawSegmentLabel(this.ctx, s.p0.x, s.p0.y, s.p1.x, s.p1.y, segmentNumber)
       }
+    }
+  }
+
+  private paintPreviewSegment(paths: Path[], selection: SelectionState) {
+    if (!this.ctx || !this.previewTarget) return
+    
+    // Only show preview when we can add a new point
+    let startPoint: GridPoint | null = null
+    let prevPoint: GridPoint | null = null  // Point before startPoint for arc direction
+    
+    if (selection.kind === 'floating-point') {
+      startPoint = selection.point
+      // No previous point for floating point
+    } else if (selection.kind === 'path') {
+      const path = paths.find(p => p.id === selection.pathId)
+      if (path && path.points.length > 0) {
+        if (selection.endpoint === 'end') {
+          startPoint = path.points[path.points.length - 1]
+          prevPoint = path.points.length > 1 ? path.points[path.points.length - 2] : null
+        } else {
+          startPoint = path.points[0]
+          prevPoint = path.points.length > 1 ? path.points[1] : null
+        }
+      }
+    }
+    
+    if (!startPoint) return
+    
+    // Don't show preview if target is same as start
+    if (startPoint.x === this.previewTarget.x && startPoint.y === this.previewTarget.y) return
+    
+    const p0 = this.toCanvasPoint(startPoint)
+    const p1 = this.toCanvasPoint(this.previewTarget)
+    
+    const dx = this.previewTarget.x - startPoint.x
+    const dy = this.previewTarget.y - startPoint.y
+    const absDx = Math.abs(dx)
+    const absDy = Math.abs(dy)
+    
+    // Determine segment type
+    const isHorizontal = absDy === 0 && absDx > 0
+    const isVertical = absDx === 0 && absDy > 0
+    const isArc = absDx === absDy && absDx > 0
+    
+    // Determine arc direction using same logic as segment-builder
+    let counterclockwise = false
+    if (isArc && prevPoint) {
+      // Use cross product of incoming vector and outgoing vector
+      const v1 = { x: startPoint.x - prevPoint.x, y: startPoint.y - prevPoint.y }
+      const v2 = { x: this.previewTarget.x - startPoint.x, y: this.previewTarget.y - startPoint.y }
+      const crossProduct = v1.x * v2.y - v1.y * v2.x
+      counterclockwise = crossProduct < 0
+    }
+    
+    // Draw the preview segment in transparent grey
+    this.ctx.strokeStyle = 'rgba(100, 100, 100, 0.5)'
+    this.ctx.lineWidth = 3
+    this.ctx.lineCap = 'round'
+    this.ctx.beginPath()
+    this.ctx.moveTo(p0.x, p0.y)
+    
+    if (isHorizontal || isVertical) {
+      // Straight line
+      this.ctx.lineTo(p1.x, p1.y)
+    } else if (isArc) {
+      drawArc(this.ctx, p0.x, p0.y, p1.x, p1.y, counterclockwise)
+    } else {
+      // Bezier - just draw straight for preview
+      this.ctx.lineTo(p1.x, p1.y)
+    }
+    this.ctx.stroke()
+    
+    // If it's an arc, highlight the center point
+    if (isArc) {
+      // Calculate arc center using same logic as calculateArcParams
+      const sameSign = (dx > 0 && dy > 0) || (dx < 0 && dy < 0)
+      let centerGridX: number
+      let centerGridY: number
+      
+      if (counterclockwise) {
+        // CCW arcs: center at (x1, y0) when same sign, (x0, y1) when different
+        if (sameSign) {
+          centerGridX = this.previewTarget.x
+          centerGridY = startPoint.y
+        } else {
+          centerGridX = startPoint.x
+          centerGridY = this.previewTarget.y
+        }
+      } else {
+        // CW arcs: center at (x0, y1) when same sign, (x1, y0) when different
+        if (sameSign) {
+          centerGridX = startPoint.x
+          centerGridY = this.previewTarget.y
+        } else {
+          centerGridX = this.previewTarget.x
+          centerGridY = startPoint.y
+        }
+      }
+      
+      const centerCanvas = this.toCanvasPoint({ x: centerGridX, y: centerGridY })
+      
+      // Draw larger, darker point for arc center
+      this.ctx.fillStyle = 'rgba(80, 80, 80, 0.8)'
+      this.ctx.beginPath()
+      this.ctx.arc(centerCanvas.x, centerCanvas.y, 8, 0, Math.PI * 2)
+      this.ctx.fill()
     }
   }
 
@@ -262,7 +509,8 @@ export class CanvasView {
       if (!path || path.points.length === 0) return
       const endIndex = selection.endpoint === 'end' ? path.points.length - 1 : 0
       const pos = this.toCanvasPoint(path.points[endIndex])
-      this.drawHandle(pos.x, pos.y, '#e24a4a')
+      // Selected endpoint is blue - this is where the next segment will be added from
+      this.drawHandle(pos.x, pos.y, '#2563eb')
       return
     }
 
@@ -288,31 +536,61 @@ export class CanvasView {
     selection: SelectionState
   ) {
     if (!this.ctx) return
+    
+    // Only show points for the selected path
+    const selectedPathId = 'pathId' in selection ? selection.pathId : null
+    if (!selectedPathId) return
+    
+    const path = paths.find(p => p.id === selectedPathId)
+    if (!path) return
 
-    for (const path of paths) {
-      for (let i = 0; i < path.points.length; i++) {
-        const pt = path.points[i]
-        const pos = this.toCanvasPoint(pt)
-        const isDragged = draggedPoint?.pathId === path.id && draggedPoint?.pointIndex === i
-        const isSelected = selection.kind === 'point' && 
-                          selection.pathId === path.id && 
-                          selection.pointIndex === i
-        
-        // Highlight selected or dragged points
-        if (isDragged || isSelected) {
-          this.ctx.fillStyle = isDragged ? '#facc15' : '#3b82f6'
-          this.ctx.strokeStyle = '#ffffff'
-          this.ctx.lineWidth = 2
-          this.ctx.beginPath()
-          this.ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2)
-          this.ctx.fill()
-          this.ctx.stroke()
-        } else {
-          this.ctx.fillStyle = '#cbd5e1'
-          this.ctx.beginPath()
-          this.ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2)
-          this.ctx.fill()
-        }
+    // Determine which endpoint is selected (for path selection mode)
+    let selectedEndpointIndex = -1
+    if (selection.kind === 'path') {
+      selectedEndpointIndex = selection.endpoint === 'end' ? path.points.length - 1 : 0
+    }
+
+    for (let i = 0; i < path.points.length; i++) {
+      const pt = path.points[i]
+      const pos = this.toCanvasPoint(pt)
+      const isDragged = draggedPoint?.pathId === path.id && draggedPoint?.pointIndex === i
+      const isSelected = selection.kind === 'point' && 
+                        selection.pathId === path.id && 
+                        selection.pointIndex === i
+      const isEndpoint = i === 0 || i === path.points.length - 1
+      
+      // Skip the selected endpoint - it's drawn by paintSelection in blue
+      if (i === selectedEndpointIndex) {
+        continue
+      }
+      
+      if (isDragged) {
+        // Dragged point: yellow filled
+        this.ctx.fillStyle = '#facc15'
+        this.ctx.strokeStyle = '#ffffff'
+        this.ctx.lineWidth = 2
+        this.ctx.beginPath()
+        this.ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2)
+        this.ctx.fill()
+        this.ctx.stroke()
+      } else if (isSelected) {
+        // Selected point: filled - blue for endpoints, red for interior
+        this.ctx.fillStyle = isEndpoint ? '#3b82f6' : '#e24a4a'
+        this.ctx.strokeStyle = '#ffffff'
+        this.ctx.lineWidth = 2
+        this.ctx.beginPath()
+        this.ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2)
+        this.ctx.fill()
+        this.ctx.stroke()
+      } else {
+        // Highlighted point (segment/path selected): white fill with red outline
+        this.ctx.fillStyle = '#ffffff'
+        this.ctx.strokeStyle = '#e24a4a'
+        this.ctx.lineWidth = 2
+        this.ctx.beginPath()
+        this.ctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2)
+        this.ctx.fill()
+        this.ctx.stroke()
       }
     }
   }
@@ -334,14 +612,6 @@ export class CanvasView {
     return buildSegments(path, (p) => this.toCanvasPoint(p))
   }
 
-  private clampHandle(anchor: Point, control: Point, maxLen: number): Point {
-    const dx = control.x - anchor.x
-    const dy = control.y - anchor.y
-    const len = Math.hypot(dx, dy) || 1
-    const scale = Math.min(1, maxLen / len)
-    return { x: anchor.x + dx * scale, y: anchor.y + dy * scale }
-  }
-
   private distance(a: Point, b: Point) {
     return Math.hypot(a.x - b.x, a.y - b.y)
   }
@@ -355,13 +625,14 @@ export class CanvasView {
 
   private pickSegment(x: number, y: number): SegmentHit | null {
     const target = { x: x / this.deviceScale, y: y / this.deviceScale }
-    const tolerance = Math.max(10, this.gridSpacingPx * 0.25)
+    // Use a larger tolerance for segment selection to make it easier to click on paths
+    const tolerance = Math.max(15, this.gridSpacingPx * 0.35)
 
     let best: SegmentHit | null = null
     let bestDist = Infinity
 
     for (const seg of this.segments) {
-      const d = this.distanceToBezier(target, seg)
+      const d = this.distanceToSegment(target, seg)
       if (d < bestDist && d <= tolerance) {
         bestDist = d
         best = { pathId: seg.pathId, segmentIndex: seg.segmentIndex }
@@ -369,6 +640,43 @@ export class CanvasView {
     }
 
     return best
+  }
+
+  private distanceToSegment(p: Point, seg: DrawableSegment): number {
+    if (seg.isCircularArc) {
+      return this.distanceToArc(p, seg)
+    }
+    return this.distanceToBezier(p, seg)
+  }
+
+  private distanceToArc(p: Point, seg: DrawableSegment): number {
+    const counterclockwise = seg.arcTurnsCounterclockwise ?? false
+    const arc = calculateArcParams(seg.p0.x, seg.p0.y, seg.p1.x, seg.p1.y, counterclockwise)
+    
+    // Sample points along the arc
+    const samples = 30
+    let minDist = Infinity
+    
+    // Calculate the angular range
+    let startAngle = arc.startAngle
+    let endAngle = arc.endAngle
+    
+    // Adjust angles based on direction
+    if (counterclockwise) {
+      if (endAngle > startAngle) endAngle -= Math.PI * 2
+    } else {
+      if (endAngle < startAngle) endAngle += Math.PI * 2
+    }
+    
+    for (let i = 0; i <= samples; i++) {
+      const t = i / samples
+      const angle = startAngle + (endAngle - startAngle) * t
+      const x = arc.centerX + arc.radius * Math.cos(angle)
+      const y = arc.centerY + arc.radius * Math.sin(angle)
+      const dist = this.distance(p, { x, y })
+      if (dist < minDist) minDist = dist
+    }
+    return minDist
   }
 
   private distanceToBezier(p: Point, seg: DrawableSegment): number {

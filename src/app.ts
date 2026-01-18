@@ -9,10 +9,10 @@ export class LineFollowerApp {
   private canvas: CanvasView
   private paths: Path[] = []
   private selection: SelectionState = { kind: 'none' }
-  private pointEditMode = false
   private straightLineMode = false
   private draggedPoint: { pathId: string; pointIndex: number } | null = null
-  private hoveredPoint: GridPoint | null = null
+  private pendingPointClick: { pathId: string; pointIndex: number; startX: number; startY: number } | null = null
+  private didDrag = false
 
   constructor() {
     this.ui = new UIController(this)
@@ -95,12 +95,6 @@ export class LineFollowerApp {
         return
       }
 
-      if (event.key === 'p' || event.key === 'P') {
-        event.preventDefault()
-        this.togglePointEditMode()
-        return
-      }
-
       if (event.key === 's' || event.key === 'S') {
         event.preventDefault()
         this.toggleStraightLineMode()
@@ -134,36 +128,75 @@ export class LineFollowerApp {
     canvasEl.addEventListener('mousedown', (e) => this.handleMouseDown(e))
     canvasEl.addEventListener('mousemove', (e) => this.handleMouseMove(e))
     canvasEl.addEventListener('mouseup', () => this.handleMouseUp())
+    canvasEl.addEventListener('contextmenu', (e) => this.handleContextMenu(e))
+  }
+
+  private handleContextMenu(e: MouseEvent) {
+    // Only show icon popup for selected points
+    if (this.selection.kind !== 'point') return
+
+    e.preventDefault()
+    
+    const sel = this.selection
+    const path = this.paths.find(p => p.id === sel.pathId)
+    if (!path) return
+    
+    const currentIcon = path.icons?.get(sel.pointIndex) ?? null
+    
+    // Get position relative to canvas wrapper
+    const wrapper = (this.canvas['canvas'] as HTMLCanvasElement).parentElement
+    if (!wrapper) return
+    const wrapperRect = wrapper.getBoundingClientRect()
+    const x = e.clientX - wrapperRect.left
+    const y = e.clientY - wrapperRect.top
+    
+    this.ui.showIconPopup(x, y, currentIcon, (icon) => {
+      this.setPointIcon(sel.pathId, sel.pointIndex, icon)
+    })
+  }
+
+  private setPointIcon(pathId: string, pointIndex: number, icon: import('./types').PointIconType) {
+    const path = this.paths.find(p => p.id === pathId)
+    if (!path) return
+    
+    if (!path.icons) {
+      path.icons = new Map()
+    }
+    
+    if (icon === null) {
+      path.icons.delete(pointIndex)
+    } else {
+      path.icons.set(pointIndex, icon)
+    }
+    
+    this.render()
   }
 
   private handleMouseDown(e: MouseEvent) {
-    if (!this.pointEditMode) return
-    
     const rect = (this.canvas['canvas'] as HTMLCanvasElement).getBoundingClientRect()
     const x = (e.clientX - rect.left) * (this.canvas['deviceScale'] || 1)
     const y = (e.clientY - rect.top) * (this.canvas['deviceScale'] || 1)
     
-    // Check if we clicked on a point
-    for (const path of this.paths) {
-      const pointIndex = path.points.findIndex(p => {
-        const pos = this.canvas['toCanvasPoint'](p)
-        const dist = Math.hypot(pos.x - x / (this.canvas['deviceScale'] || 1), pos.y - y / (this.canvas['deviceScale'] || 1))
-        return dist < 12
-      })
-      if (pointIndex >= 0) {
-        // Select the point and prepare for drag
-        this.selection = { kind: 'point', pathId: path.id, pointIndex }
-        this.draggedPoint = { pathId: path.id, pointIndex }
-        this.render()
-        e.preventDefault()
-        return
+    // Check if we're clicking on a highlighted path point (when segment/path is selected)
+    if (this.selection.kind === 'segment' || this.selection.kind === 'path' || this.selection.kind === 'point') {
+      const selectedPathId = this.selection.pathId
+      const path = this.paths.find(p => p.id === selectedPathId)
+      if (path) {
+        const pointIndex = path.points.findIndex(p => {
+          const pos = this.canvas['toCanvasPoint'](p)
+          const dist = Math.hypot(pos.x - x / (this.canvas['deviceScale'] || 1), pos.y - y / (this.canvas['deviceScale'] || 1))
+          return dist < 12
+        })
+        if (pointIndex >= 0) {
+          // Store pending click - we'll decide if it's a select or drag on mouseup/mousemove
+          this.pendingPointClick = { pathId: path.id, pointIndex, startX: x, startY: y }
+          this.didDrag = false
+          // Suppress the canvas click handler since we're handling this point
+          this.canvas.suppressClick()
+          e.preventDefault()
+          return
+        }
       }
-    }
-    
-    // Clicked on background - clear selection
-    if (this.selection.kind === 'point') {
-      this.selection = { kind: 'none' }
-      this.render()
     }
   }
 
@@ -174,8 +207,24 @@ export class LineFollowerApp {
     
     const point = this.canvas['pickGridPoint'](x, y)
     
-    // Handle dragging in point edit mode
-    if (this.pointEditMode && this.draggedPoint) {
+    // Check if user started dragging from a pending point click
+    if (this.pendingPointClick && !this.draggedPoint) {
+      const dx = x - this.pendingPointClick.startX
+      const dy = y - this.pendingPointClick.startY
+      const dragThreshold = 5
+      if (Math.hypot(dx, dy) > dragThreshold) {
+        // User is dragging - start the drag operation
+        this.draggedPoint = { 
+          pathId: this.pendingPointClick.pathId, 
+          pointIndex: this.pendingPointClick.pointIndex 
+        }
+        this.didDrag = true
+        // Don't select the point yet - just drag
+      }
+    }
+    
+    // Handle dragging a point
+    if (this.draggedPoint) {
       if (point) {
         const path = this.paths.find(p => p.id === this.draggedPoint!.pathId)
         if (path) {
@@ -186,35 +235,49 @@ export class LineFollowerApp {
       return
     }
     
+    // Update preview target for showing ghost segment
+    const sel = this.selection
+    if (sel.kind === 'floating-point' || sel.kind === 'path') {
+      this.canvas.setPreviewTarget(point)
+      this.render()
+    } else {
+      this.canvas.setPreviewTarget(null)
+    }
+    
     // Track hover for angle display when drawing
-    if (!this.pointEditMode && point) {
-      this.hoveredPoint = point
-      
+    if (point) {
       // Show angle info if we have a path endpoint selected
-      if (this.selection.kind === 'path') {
-        const path = this.paths.find(p => p.id === this.selection.pathId)
+      if (sel.kind === 'path') {
+        const path = this.paths.find(p => p.id === sel.pathId)
         if (path && path.points.length > 0) {
-          const endpoint = this.selection.endpoint === 'end'
+          const endpoint = sel.endpoint === 'end'
             ? path.points[path.points.length - 1]
             : path.points[0]
           this.ui.updateAngleInfo(endpoint.x, endpoint.y, point.x, point.y)
         }
-      } else if (this.selection.kind === 'floating-point') {
-        this.ui.updateAngleInfo(this.selection.point.x, this.selection.point.y, point.x, point.y)
+      } else if (sel.kind === 'floating-point') {
+        this.ui.updateAngleInfo(sel.point.x, sel.point.y, point.x, point.y)
       }
     }
   }
 
   private handleMouseUp() {
+    // If we had a pending point click and didn't drag, select the point
+    if (this.pendingPointClick && !this.didDrag) {
+      this.selection = { 
+        kind: 'point', 
+        pathId: this.pendingPointClick.pathId, 
+        pointIndex: this.pendingPointClick.pointIndex 
+      }
+      this.render()
+    }
+    
     this.draggedPoint = null
+    this.pendingPointClick = null
+    this.didDrag = false
   }
 
   private handlePointClick(point: GridPoint) {
-    if (this.pointEditMode) {
-      // In point edit mode, we don't select - drag only
-      return
-    }
-
     if (this.selection.kind === 'floating-point') {
       const newPath: Path = {
         id: crypto.randomUUID(),
@@ -238,6 +301,29 @@ export class LineFollowerApp {
       }
       this.render()
       return
+    }
+
+    // If a point is selected (endpoint), extend the path from that endpoint
+    if (this.selection.kind === 'point') {
+      const selection = this.selection
+      const path = this.paths.find((p) => p.id === selection.pathId)
+      if (!path) return
+      
+      const isStartEndpoint = selection.pointIndex === 0
+      const isEndEndpoint = selection.pointIndex === path.points.length - 1
+      
+      if (isEndEndpoint) {
+        path.points.push(point)
+        this.selection = { kind: 'path', pathId: path.id, endpoint: 'end' }
+        this.render()
+        return
+      } else if (isStartEndpoint) {
+        path.points.unshift(point)
+        this.selection = { kind: 'path', pathId: path.id, endpoint: 'start' }
+        this.render()
+        return
+      }
+      // If it's an interior point, don't extend - just select the new point as floating
     }
 
     this.selection = { kind: 'floating-point', point }
@@ -266,13 +352,6 @@ export class LineFollowerApp {
   private clearSelection() {
     this.selection = { kind: 'none' }
     this.draggedPoint = null
-    this.render()
-  }
-
-  private togglePointEditMode() {
-    this.pointEditMode = !this.pointEditMode
-    this.draggedPoint = null
-    this.selection = { kind: 'none' }
     this.render()
   }
 
@@ -380,6 +459,12 @@ export class LineFollowerApp {
     const base62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
     const GRID_SIZE = 25 // GRID_POINTS from types.ts
     
+    // Icon type to single character encoding
+    const iconToChar: Record<string, string> = {
+      'play': 'P', 'fastforward': 'F', 'stop': 'S', 
+      'caution': 'C', 'circle': 'O', 'square': 'Q'
+    }
+    
     const pointToIndex = (pt: GridPoint): number => pt.y * GRID_SIZE + pt.x
     const indexToBase62 = (n: number): string => {
       const high = Math.floor(n / 62)
@@ -388,7 +473,21 @@ export class LineFollowerApp {
     }
 
     const encodedPaths = this.paths.map(path => {
-      return path.points.map(pt => indexToBase62(pointToIndex(pt))).join('')
+      // Encode points
+      const pointsEncoded = path.points.map(pt => indexToBase62(pointToIndex(pt))).join('')
+      
+      // Encode icons if present: !<index><iconChar>...
+      let iconsEncoded = ''
+      if (path.icons && path.icons.size > 0) {
+        iconsEncoded = '!'
+        for (const [idx, iconType] of path.icons) {
+          if (iconType && iconToChar[iconType]) {
+            iconsEncoded += base62[idx] + iconToChar[iconType]
+          }
+        }
+      }
+      
+      return pointsEncoded + iconsEncoded
     })
 
     return encodedPaths.join(',')
@@ -398,6 +497,12 @@ export class LineFollowerApp {
     try {
       const base62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
       const GRID_SIZE = 25
+      
+      // Icon character to type mapping
+      const charToIcon: Record<string, import('./types').PointIconType> = {
+        'P': 'play', 'F': 'fastforward', 'S': 'stop',
+        'C': 'caution', 'O': 'circle', 'Q': 'square'
+      }
       
       const base62ToIndex = (s: string): number => {
         if (s.length !== 2) return -1
@@ -415,14 +520,17 @@ export class LineFollowerApp {
       console.log('Decoding paths:', pathStrings)
 
       for (const pathStr of pathStrings) {
-        if (pathStr.length % 2 !== 0) {
-          console.warn('Skipping path with odd length:', pathStr)
+        // Split by ! to separate points from icons
+        const [pointsStr, iconsStr] = pathStr.split('!')
+        
+        if (pointsStr.length % 2 !== 0) {
+          console.warn('Skipping path with odd length:', pointsStr)
           continue
         }
         
         const points: GridPoint[] = []
-        for (let i = 0; i < pathStr.length; i += 2) {
-          const pair = pathStr.slice(i, i + 2)
+        for (let i = 0; i < pointsStr.length; i += 2) {
+          const pair = pointsStr.slice(i, i + 2)
           const index = base62ToIndex(pair)
           console.log(`Pair "${pair}" -> index ${index}`)
           if (index >= 0 && index < GRID_SIZE * GRID_SIZE) {
@@ -434,9 +542,25 @@ export class LineFollowerApp {
           }
         }
         
+        // Decode icons if present
+        let icons: import('./types').PointIcons | undefined
+        if (iconsStr && iconsStr.length >= 2) {
+          icons = new Map()
+          for (let i = 0; i < iconsStr.length; i += 2) {
+            const idxChar = iconsStr[i]
+            const iconChar = iconsStr[i + 1]
+            const pointIdx = base62.indexOf(idxChar)
+            const iconType = charToIcon[iconChar]
+            if (pointIdx >= 0 && pointIdx < points.length && iconType) {
+              icons.set(pointIdx, iconType)
+            }
+          }
+          if (icons.size === 0) icons = undefined
+        }
+        
         console.log('Path points:', points)
         if (points.length >= 2) {
-          paths.push({ id: crypto.randomUUID(), points })
+          paths.push({ id: crypto.randomUUID(), points, icons })
         }
       }
 
@@ -449,24 +573,21 @@ export class LineFollowerApp {
   }
 
   private render() {
-    this.canvas.render(this.paths, this.selection, this.pointEditMode, this.draggedPoint)
+    this.canvas.render(this.paths, this.selection, this.draggedPoint)
     this.ui.updateSelection(this.selection)
-    this.ui.updateMode(this.pointEditMode)
     
     // Update angle info for segments and floating points
-    if (this.selection.kind === 'segment') {
-      const path = this.paths.find(p => p.id === this.selection.pathId)
-      if (path && this.selection.segmentIndex < path.points.length - 1) {
-        const p0 = path.points[this.selection.segmentIndex]
-        const p1 = path.points[this.selection.segmentIndex + 1]
+    const sel = this.selection
+    if (sel.kind === 'segment') {
+      const path = this.paths.find(p => p.id === sel.pathId)
+      if (path && sel.segmentIndex < path.points.length - 1) {
+        const p0 = path.points[sel.segmentIndex]
+        const p1 = path.points[sel.segmentIndex + 1]
         this.ui.updateAngleInfo(p0.x, p0.y, p1.x, p1.y)
       }
-    } else if (this.selection.kind === 'path') {
-      const path = this.paths.find(p => p.id === this.selection.pathId)
+    } else if (sel.kind === 'path') {
+      const path = this.paths.find(p => p.id === sel.pathId)
       if (path && path.points.length > 0) {
-        const endpoint = this.selection.endpoint === 'end' 
-          ? path.points[path.points.length - 1]
-          : path.points[0]
         // Show angle info if there's a hovered point (we'll need to track this)
         this.ui.hideAngleInfo()
       }

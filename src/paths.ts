@@ -1,6 +1,7 @@
+import { GRID_POINTS, GRID_SPACING_INCHES, LINE_WIDTH_INCHES } from './config'
 import { GridPoint, Path, Point } from './types'
 import { createCanvas } from 'canvas'
-import { drawArc } from './arc-utils'
+import { drawArc, calculateArcParams } from './arc-utils'
 import { buildSegments } from './segment-builder'
 
 // Type definitions for canvas operations
@@ -81,15 +82,51 @@ export function decodeDesignFromUrl(encoded: string): Path[] {
  * - cross > 0: right turn (CW arc)
  * - cross < 0: left turn (CCW arc)
  */
-function getArcDirection(incomingVec: { x: number; y: number }, outgoingVec: { x: number; y: number }): string {
-  const cross = incomingVec.x * outgoingVec.y - incomingVec.y * outgoingVec.x
-  return cross > 0 ? 'A+' : 'A-'  // A+ = CW, A- = CCW
+// Arc direction helper kept for documentation purposes - actual logic is in segment-builder.ts
+
+// Segment type for internal computation
+type SegmentType = 'H' | 'V' | 'A' | 'B'
+
+/**
+ * Determine segment type based on geometry
+ */
+function getSegmentType(dx: number, dy: number): SegmentType {
+  const absDx = Math.abs(dx)
+  const absDy = Math.abs(dy)
+  
+  if (absDy === 0 && absDx > 0) return 'H'
+  if (absDx === 0 && absDy > 0) return 'V'
+  if (absDx === absDy) return 'A'
+  return 'B'
+}
+
+/**
+ * Normalize angle to -180 to 180 range
+ */
+function normalizeAngle(angle: number): number {
+  while (angle > 180) angle -= 360
+  while (angle <= -180) angle += 360
+  return angle
+}
+
+/**
+ * Convert a direction vector to an angle in degrees
+ */
+function vectorToAngle(x: number, y: number): number {
+  return normalizeAngle(Math.round(Math.atan2(y, x) * 180 / Math.PI))
 }
 
 /**
  * Build netlist segments from a path
  * Analyzes each segment to determine type and angles
  * For arcs, determines direction (CW vs CCW) based on path turn
+ * 
+ * ANGLE RULES:
+ * - H segments: entry and exit angles match the straight-line angle (0 or 180)
+ * - V segments: entry and exit angles match the straight-line angle (90 or -90)
+ * - A+ segments: exit angle = entry angle + 90 (CW turn)
+ * - A- segments: exit angle = entry angle - 90 (CCW turn)
+ * - B segments: inherit angles from adjacent H/V/A segments for C1 continuity
  */
 export function buildNetlistSegments(path: Path, startingSegmentNumber: number = 1): NetlistSegment[] {
   const netSegs: NetlistSegment[] = []
@@ -97,72 +134,173 @@ export function buildNetlistSegments(path: Path, startingSegmentNumber: number =
 
   if (points.length < 2) return netSegs
 
+  // First pass: determine segment types and straight-line angles
+  interface SegmentInfo {
+    index: number
+    x0: number; y0: number
+    x1: number; y1: number
+    dx: number; dy: number
+    type: SegmentType
+    lineType: string  // H, V, A+, A-, B
+    angle: number     // straight-line angle
+    counterclockwise: boolean  // for arcs
+  }
+  
+  const segmentInfos: SegmentInfo[] = []
+  
   for (let i = 0; i < points.length - 1; i++) {
-    const segmentNumber = startingSegmentNumber + i
     const x0 = points[i].x
     const y0 = points[i].y
     const x1 = points[i + 1].x
     const y1 = points[i + 1].y
-
+    
     // Skip zero-length segments
-    if (x0 === x1 && y0 === y1) {
-      continue
-    }
-
+    if (x0 === x1 && y0 === y1) continue
+    
     const dx = x1 - x0
     const dy = y1 - y0
+    const type = getSegmentType(dx, dy)
+    const angle = vectorToAngle(dx, dy)
+    
     let lineType: string
-
-    // Determine line type based on direction
-    if (dy === 0 && dx !== 0) {
-      lineType = 'H'      // Horizontal
-    } else if (dx === 0 && dy !== 0) {
-      lineType = 'V'      // Vertical
-    } else if (Math.abs(dx) === Math.abs(dy)) {
-      // Arc (diagonal) - determine if CW or CCW based on turn direction
-      // For arcs, we need to look at the turn from previous segment to this one
-      if (i > 0) {
-        // Get incoming vector: from previous point to current point
-        const prevX = points[i - 1].x
-        const prevY = points[i - 1].y
-        const incomingX = x0 - prevX
-        const incomingY = y0 - prevY
+    let counterclockwise = false
+    
+    if (type === 'H') {
+      lineType = 'H'
+    } else if (type === 'V') {
+      lineType = 'V'
+    } else if (type === 'A') {
+      // Arc - determine CW or CCW from turn direction
+      if (segmentInfos.length > 0) {
+        const prev = segmentInfos[segmentInfos.length - 1]
+        const cross = prev.dx * dy - prev.dy * dx
         
-        // Get outgoing vector: from current point to next point
-        const outgoingX = x1 - x0
-        const outgoingY = y1 - y0
-        
-        lineType = getArcDirection({ x: incomingX, y: incomingY }, { x: outgoingX, y: outgoingY })
+        if (cross === 0 && prev.type === 'A') {
+          // S-curve: two consecutive arcs with parallel direction vectors
+          // Second arc must be opposite rotation for C1 continuity
+          lineType = prev.lineType === 'A+' ? 'A-' : 'A+'
+          counterclockwise = !prev.counterclockwise
+        } else {
+          lineType = cross > 0 ? 'A+' : 'A-'
+          counterclockwise = cross < 0
+        }
+      } else if (i < points.length - 2) {
+        // First segment, look ahead
+        const nextDx = points[i + 2].x - x1
+        const nextDy = points[i + 2].y - y1
+        const cross = dx * nextDy - dy * nextDx
+        lineType = cross > 0 ? 'A+' : 'A-'
+        counterclockwise = cross < 0
       } else {
-        // First segment: default to CW if we don't have a previous point
         lineType = 'A+'
       }
     } else {
-      lineType = 'B'      // Bezier (arbitrary)
+      lineType = 'B'
     }
-
-    // Calculate angle from start to end (in degrees)
-    let angle = Math.round(Math.atan2(dy, dx) * 180 / Math.PI)
     
-    // Normalize angle to -180 to 180 range
-    if (angle > 180) angle -= 360
-    if (angle <= -180) angle += 360
-
-    // For simple segments, entry and exit angles match the line angle
-    // (These would be different for bezier curves with complex control points)
-    let entryAngle = angle
-    let exitAngle = angle
-
-    netSegs.push({
-      segmentNumber,
-      angle,
+    segmentInfos.push({
+      index: i,
+      x0, y0, x1, y1,
+      dx, dy,
+      type,
       lineType,
-      entryAngle,
-      xStart: x0,
-      yStart: y0,
-      xEnd: x1,
-      yEnd: y1,
-      exitAngle
+      angle,
+      counterclockwise
+    })
+  }
+
+  // Second pass: compute entry and exit angles
+  // H/V: entry = exit = straight-line angle
+  // A+: exit = entry + 90
+  // A-: exit = entry - 90
+  // B: inherit from adjacent H/V/A
+  
+  for (let i = 0; i < segmentInfos.length; i++) {
+    const seg = segmentInfos[i]
+    const prevSeg = i > 0 ? segmentInfos[i - 1] : null
+    const nextSeg = i < segmentInfos.length - 1 ? segmentInfos[i + 1] : null
+    
+    let entryAngle: number
+    let exitAngle: number
+    
+    if (seg.type === 'H' || seg.type === 'V') {
+      // H and V: entry and exit are both the straight-line angle
+      entryAngle = seg.angle
+      exitAngle = seg.angle
+    } else if (seg.type === 'A') {
+      // Arc: compute tangent angles from arc geometry
+      // Use grid coordinates directly (Y+ down like canvas)
+      const arc = calculateArcParams(seg.x0, seg.y0, seg.x1, seg.y1, seg.counterclockwise)
+      
+      // Tangent at start: perpendicular to radius from center to start
+      const startRadiusX = seg.x0 - arc.centerX
+      const startRadiusY = seg.y0 - arc.centerY
+      
+      // Tangent at end: perpendicular to radius from center to end
+      const endRadiusX = seg.x1 - arc.centerX
+      const endRadiusY = seg.y1 - arc.centerY
+      
+      // Tangent is perpendicular to radius, in direction of travel
+      // For CW (A+): tangent = rotate radius 90° CCW = (-y, x)
+      // For CCW (A-): tangent = rotate radius 90° CW = (y, -x)
+      if (seg.counterclockwise) {
+        // CCW arc (A-)
+        entryAngle = vectorToAngle(startRadiusY, -startRadiusX)
+        exitAngle = vectorToAngle(endRadiusY, -endRadiusX)
+      } else {
+        // CW arc (A+)
+        entryAngle = vectorToAngle(-startRadiusY, startRadiusX)
+        exitAngle = vectorToAngle(-endRadiusY, endRadiusX)
+      }
+    } else {
+      // Bezier: inherit angles from adjacent fixed segments
+      // Entry angle: match exit of previous segment if it's H/V/A
+      if (prevSeg && (prevSeg.type === 'H' || prevSeg.type === 'V')) {
+        entryAngle = prevSeg.angle
+      } else if (prevSeg && prevSeg.type === 'A') {
+        // Need to compute exit angle of previous arc
+        const arc = calculateArcParams(prevSeg.x0, prevSeg.y0, prevSeg.x1, prevSeg.y1, prevSeg.counterclockwise)
+        const endRadiusX = prevSeg.x1 - arc.centerX
+        const endRadiusY = prevSeg.y1 - arc.centerY
+        if (prevSeg.counterclockwise) {
+          entryAngle = vectorToAngle(endRadiusY, -endRadiusX)
+        } else {
+          entryAngle = vectorToAngle(-endRadiusY, endRadiusX)
+        }
+      } else {
+        // Default to straight-line angle
+        entryAngle = seg.angle
+      }
+      
+      // Exit angle: match entry of next segment if it's H/V/A
+      if (nextSeg && (nextSeg.type === 'H' || nextSeg.type === 'V')) {
+        exitAngle = nextSeg.angle
+      } else if (nextSeg && nextSeg.type === 'A') {
+        // Need to compute entry angle of next arc
+        const arc = calculateArcParams(nextSeg.x0, nextSeg.y0, nextSeg.x1, nextSeg.y1, nextSeg.counterclockwise)
+        const startRadiusX = nextSeg.x0 - arc.centerX
+        const startRadiusY = nextSeg.y0 - arc.centerY
+        if (nextSeg.counterclockwise) {
+          exitAngle = vectorToAngle(startRadiusY, -startRadiusX)
+        } else {
+          exitAngle = vectorToAngle(-startRadiusY, startRadiusX)
+        }
+      } else {
+        // Default to straight-line angle
+        exitAngle = seg.angle
+      }
+    }
+    
+    netSegs.push({
+      segmentNumber: startingSegmentNumber + i,
+      angle: seg.angle,
+      lineType: seg.lineType,
+      entryAngle: normalizeAngle(entryAngle),
+      xStart: seg.x0,
+      yStart: seg.y0,
+      xEnd: seg.x1,
+      yEnd: seg.y1,
+      exitAngle: normalizeAngle(exitAngle)
     })
   }
 
@@ -316,7 +454,6 @@ export function renderPathsCurvedToCanvas(
   const gridPointColor = options?.gridPointColor ?? '#334155'
   const pathColor = options?.pathColor ?? '#22d3ee'
 
-  const GRID_POINTS = 25
   const boardPadding = 40
   const usableWidth = canvasWidth - boardPadding * 2
   const usableHeight = canvasHeight - boardPadding * 2
@@ -361,8 +498,10 @@ export function renderPathsCurvedToCanvas(
   }
 
   // Draw paths with curves
+  // Calculate proportional line width: LINE_WIDTH_INCHES relative to grid spacing
+  const lineWidthPx = (LINE_WIDTH_INCHES / GRID_SPACING_INCHES) * gridSpacingPx
   ctx.strokeStyle = pathColor
-  ctx.lineWidth = 3
+  ctx.lineWidth = lineWidthPx
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
