@@ -13,6 +13,7 @@ export class LineFollowerApp {
   private draggedPoint: { pathId: string; pointIndex: number } | null = null
   private pendingPointClick: { pathId: string; pointIndex: number; startX: number; startY: number } | null = null
   private didDrag = false
+  private title = ''
 
   constructor() {
     this.ui = new UIController(this)
@@ -76,10 +77,23 @@ export class LineFollowerApp {
     link.click()
   }
 
+  setTitle(title: string) {
+    this.title = title
+  }
+
+  getTitle(): string {
+    return this.title
+  }
+
   shareDesign() {
     const encoded = this.encodeDesign()
-    const url = `${window.location.origin}${window.location.pathname}?g=${encoded}`
-    const newUrl = `${window.location.pathname}?g=${encoded}`
+    const params = new URLSearchParams()
+    params.set('g', encoded)
+    if (this.title) {
+      params.set('t', this.title)
+    }
+    const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`
+    const newUrl = `${window.location.pathname}?${params.toString()}`
     window.history.replaceState({}, '', newUrl)
     navigator.clipboard.writeText(url)
   }
@@ -95,6 +109,12 @@ export class LineFollowerApp {
 
   private bindKeyboard() {
     window.addEventListener('keydown', (event) => {
+      // Don't capture keyboard shortcuts when typing in an input field
+      const target = event.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return
+      }
+
       if (event.key === 'Escape') {
         this.clearSelection()
         return
@@ -607,8 +627,13 @@ export class LineFollowerApp {
   private restoreFromQuery() {
     const params = new URLSearchParams(window.location.search)
     const encoded = params.get('g')
+    const title = params.get('t')
     if (encoded) {
       this.loadDesign(encoded)
+    }
+    if (title) {
+      this.title = title
+      this.ui.setTitle(title)
     }
   }
 }

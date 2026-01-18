@@ -58,6 +58,7 @@ export class UIController {
           </aside>
 
           <section class="canvas-wrap">
+            <input type="text" id="board-title" class="board-title" placeholder="Untitled Board" maxlength="50" />
             <canvas id="board-canvas" aria-label="line follower board"></canvas>
             <div id="icon-popup" class="icon-popup"></div>
           </section>
@@ -196,6 +197,13 @@ export class UIController {
     }
   }
 
+  setTitle(title: string) {
+    const input = document.querySelector<HTMLInputElement>('#board-title')
+    if (input) {
+      input.value = title
+    }
+  }
+
   private bindEvents() {
     document.getElementById('clear-btn')?.addEventListener('click', () => {
       if (confirm('Clear all lines?')) {
@@ -213,6 +221,11 @@ export class UIController {
 
     document.getElementById('png-btn')?.addEventListener('click', () => {
       this.app.downloadPNG()
+    })
+
+    document.getElementById('board-title')?.addEventListener('input', (e) => {
+      const input = e.target as HTMLInputElement
+      this.app.setTitle(input.value)
     })
   }
 }
