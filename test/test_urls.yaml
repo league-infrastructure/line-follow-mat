@@ -35,6 +35,9 @@ tests:
     url: http://localhost:5173/?g=0002040u1i2W
 
   - name: pear_loop
+    url: http://localhost:5173/?g=0V0v1j293M3k3i3I251h0t0V
+
+  - name: wobble
     url: http://localhost:5173/?g=262A1n2d3R4E3O3J2s2T26
 
   

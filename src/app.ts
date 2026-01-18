@@ -118,6 +118,12 @@ export class LineFollowerApp {
         this.deleteSelection()
         return
       }
+
+      if (event.key === 'a' || event.key === 'A') {
+        event.preventDefault()
+        this.addPointToSegment()
+        return
+      }
     })
   }
 
@@ -332,6 +338,42 @@ export class LineFollowerApp {
     }
 
     this.paths = this.paths.filter((p) => p.id !== pathId).concat(updated)
+  }
+
+  private addPointToSegment() {
+    if (this.selection.kind !== 'segment') return
+    const selection = this.selection
+
+    const path = this.paths.find((p) => p.id === selection.pathId)
+    if (!path) return
+
+    const segIdx = selection.segmentIndex
+    if (segIdx < 0 || segIdx >= path.points.length - 1) return
+
+    const p0 = path.points[segIdx]
+    const p1 = path.points[segIdx + 1]
+
+    // Calculate midpoint (round to nearest grid point)
+    const midX = Math.round((p0.x + p1.x) / 2)
+    const midY = Math.round((p0.y + p1.y) / 2)
+
+    // Don't add if midpoint is same as either endpoint
+    if ((midX === p0.x && midY === p0.y) || (midX === p1.x && midY === p1.y)) {
+      return
+    }
+
+    // Insert the new point
+    const newPoints = [
+      ...path.points.slice(0, segIdx + 1),
+      { x: midX, y: midY },
+      ...path.points.slice(segIdx + 1)
+    ]
+
+    path.points = newPoints
+
+    // Select the new point
+    this.selection = { kind: 'point', pathId: path.id, pointIndex: segIdx + 1 }
+    this.render()
   }
 
   private encodeDesign(): string {
