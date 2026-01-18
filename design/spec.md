@@ -73,15 +73,52 @@ Lines are drawn with Bezier, and there are constraints on the splines.
   pick the one that makes the slope with other points the closest to horizonal
   or vertical. 
 
-* 
+
+## Editing and Selection
+
+User can select segments, paths and path points. ( "points" below refers to path
+points, not grid points, which will be explicit. )
+
+* Clicking on an unselected path segment selects the segment. A selected segment
+  shows the segment in red, and highlights the two end points in red unfilled circles. 
+* Clicking on a selected segment selects the whole path and highlights the 
+  points of the path in red unfilled circles. 
+* Clicking on selected path selects the segment under the path
+* User can drag highlighted points. 
+* Clicking on a highlighted point selects the point, which fills in the point.
+  Interior points will be shown selected in solid red, but end points will be
+  shown selected in solid blue. 
+* Only one object can be selected at a time. Selecting a new object will clear other selections. 
+* If an endpoint is selected, then clicking near a grid point will add a new segment from the selected grid point. 
+
+`Esc` key will cancel any selections 
+
+Backspace, Deleted key or `d` will delete the selected objects. Paths are
+deleted entirely. Segments are deleted but interior points remain, while path
+end points are deleted. Deleting an interior segment will result in splitting
+the path into two paths. Deleting a point will ( effectively ) delete both
+segments that the point connects to, then create a new segment between the
+deleted segment's end points
+
+If a segment is selected, `A` will add a point to the middle of the segment. 
+
+If a end point is selected Space will select the other end point. 
+
+# Point icons
+
+The user can right click  on a selected point to get a pop up menu of icons that can be displayed for the point. These icons are: 
+
+* "Play" triangle
+* "Fast Forward double triangle
+* Stop sign
+* "Caution" triangle
+* Circle
+* Square
 
 
-## Editing lines. 
+The icons are displayed with a white shadow so they are easy to see against the
+line. The are sized to fill one grid tile. 
 
-The `P` key will toggle ppint editing mode. In point editing mode, all points
-that a path goes through on the screen will be come visible. The user can select
-a point and drag it to a new location ( snapping to the grid ) the path will
-redraw with each snap. 
 
 ## URL Link Storage
 
@@ -112,4 +149,69 @@ Notes:
 When the application is loaded with the `g=` query, the application will draw
 the paths described in the query. 
 
+## Netlist format
 
+The netlist format is used for debugging and testing path geometry. Each line 
+describes one segment with fixed-width columns:
+
+```
+<seg#> <angle> <type> <entry> (<x0>,<y0>) (<x1>,<y1>) <exit>
+```
+
+### Columns
+
+| Column | Width | Description |
+|--------|-------|-------------|
+| seg#   | 2     | Segment number (1-based) |
+| angle  | 4     | Straight-line angle from start to end point (degrees, -180 to 180) |
+| type   | 4     | Segment type: H, V, A+, A-, or B |
+| entry  | 4     | Entry angle - direction entering the segment at start point |
+| coords | 14    | Start and end coordinates: (x0,y0) (x1,y1) |
+| exit   | 4     | Exit angle - direction leaving the segment at end point |
+
+### Segment Types
+
+- **H** (Horizontal): Both endpoints have the same Y coordinate. Entry and exit 
+  angles are both 0° (right) or 180° (left).
+  
+- **V** (Vertical): Both endpoints have the same X coordinate. Entry and exit 
+  angles are both 90° (down) or -90° (up).
+  
+- **A+** (Clockwise Arc): A 90° arc turning clockwise. Entry and exit angles 
+  differ by 90°, with exit = entry + 90° (mod 360).
+  
+- **A-** (Counter-clockwise Arc): A 90° arc turning counter-clockwise. Entry and 
+  exit angles differ by 90°, with exit = entry - 90° (mod 360).
+  
+- **B** (Bezier/Spline): A smooth curve for non-standard geometries. Entry angle 
+  matches the exit angle of the previous segment; exit angle matches the entry 
+  angle of the next segment. This ensures C1 continuity.
+
+### Angle Rules
+
+Entry and exit angles ensure C1 continuity through each vertex:
+
+1. **H and V segments**: Entry and exit angles are identical to the straight-line 
+   angle (the curve passes straight through).
+
+2. **Arc segments (A+, A-)**: Entry and exit angles differ by exactly 90°. The 
+   tangent at each point is perpendicular to the radius from the arc center.
+
+3. **Bezier segments**: 
+   - When connected to H, V, or A: inherit the fixed angle from that segment
+   - When connected to another B: use blended angle for smooth continuity
+
+### Example
+
+```
+ 1    0 H       0 ( 5, 5) ( 9, 5)    0
+ 2  -27 B     -27 ( 9, 5) (11, 4)  -45
+ 3   45 A+    -45 (11, 4) (13, 6)   45
+ 4   90 V      90 (13, 6) (13, 8)   90
+```
+
+In this example:
+- Segment 1 is horizontal, angles are all 0°
+- Segment 2 is a bezier that starts at -27° and ends at -45° to match the arc
+- Segment 3 is a clockwise arc, entry -45° + 90° = 45° exit
+- Segment 4 is vertical at 90°
