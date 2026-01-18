@@ -1,7 +1,7 @@
-import { GRID_POINTS, GridPoint, Path, SelectionState } from './types'
+import { GRID_POINTS, GridPoint, Path, Point, SelectionState } from './types'
 import { drawArrowHead, drawSegmentLabel } from './paths'
-
-type Point = { x: number; y: number }
+import { drawArc } from './arc-utils'
+import { buildSegments, DrawableSegment } from './segment-builder'
 
 export interface SegmentHit {
   pathId: string
@@ -12,17 +12,6 @@ interface CanvasCallbacks {
   onPoint(point: GridPoint): void
   onSegment(hit: SegmentHit): void
   onBackground(): void
-}
-
-interface DrawableSegment {
-  pathId: string
-  segmentIndex: number
-  p0: Point
-  p1: Point
-  cp1: Point
-  cp2: Point
-  isCircularArc?: boolean
-  arcTurnsCounterclockwise?: boolean
 }
 
 export class CanvasView {
@@ -203,7 +192,7 @@ export class CanvasView {
 
     this.segments = []
     for (const path of paths) {
-      const segs = this.buildSegments(path)
+      const segs = this.buildPathSegments(path)
       this.segments.push(...segs)
       const isPathSelected =
         this.lastSelection.kind === 'path' && this.lastSelection.pathId === path.id
@@ -223,42 +212,9 @@ export class CanvasView {
           // Draw straight line regardless of segment type
           this.ctx.lineTo(s.p1.x, s.p1.y)
         } else if (s.isCircularArc) {
-          // Draw a perfect circular arc with C1 continuity
-          // The center is positioned so the radius is perpendicular to both incoming and outgoing directions
-          const dx = s.p1.x - s.p0.x
-          const dy = s.p1.y - s.p0.y
-          
-          // Determine center based on the signs of dx and dy
-          // This ensures the tangent is continuous with the incoming direction
-          let centerX: number
-          let centerY: number
-          
-          if (dx > 0 && dy > 0) {
-            // Right-down: center at (p1.x, p0.y)
-            centerX = s.p1.x
-            centerY = s.p0.y
-          } else if (dx < 0 && dy > 0) {
-            // Left-down: center at (p0.x, p0.y)
-            centerX = s.p0.x
-            centerY = s.p0.y
-          } else if (dx < 0 && dy < 0) {
-            // Left-up: center at (p0.x, p1.y)
-            centerX = s.p0.x
-            centerY = s.p1.y
-          } else {
-            // Right-up: center at (p1.x, p1.y)
-            centerX = s.p1.x
-            centerY = s.p1.y
-          }
-          
-          const radius = Math.abs(dx) // or Math.abs(dy), they're equal for diagonals
-          const startAngle = Math.atan2(s.p0.y - centerY, s.p0.x - centerX)
-          const endAngle = Math.atan2(s.p1.y - centerY, s.p1.x - centerX)
-          
-          // Use the turn direction calculated in buildSegments()
+          // Draw a perfect circular arc using shared utility
           const counterclockwise = s.arcTurnsCounterclockwise ?? false
-          
-          this.ctx.arc(centerX, centerY, radius, startAngle, endAngle, counterclockwise)
+          drawArc(this.ctx, s.p0.x, s.p0.y, s.p1.x, s.p1.y, counterclockwise)
         } else {
           // Draw a bezier curve
           this.ctx.bezierCurveTo(s.cp1.x, s.cp1.y, s.cp2.x, s.cp2.y, s.p1.x, s.p1.y)
@@ -280,7 +236,7 @@ export class CanvasView {
     if (!this.ctx) return
 
     for (const path of paths) {
-      const segs = this.buildSegments(path)
+      const segs = this.buildPathSegments(path)
       
       for (let i = 0; i < segs.length; i++) {
         const s = segs[i]
@@ -372,158 +328,10 @@ export class CanvasView {
     this.ctx.stroke()
   }
 
-  private buildSegments(path: Path): DrawableSegment[] {
-    const pts = path.points.map((p) => this.toCanvasPoint(p))
-    const segments: DrawableSegment[] = []
-    if (pts.length < 2) return segments
-
-    // Helper: compute angle between two vectors (in radians)
-    const angleBetween = (v1: Point, v2: Point): number => {
-      const dot = v1.x * v2.x + v1.y * v2.y
-      const det = v1.x * v2.y - v1.y * v2.x
-      return Math.atan2(det, dot)
-    }
-
-    // Helper: normalize vector
-    const normalize = (v: Point): Point => {
-      const len = Math.hypot(v.x, v.y) || 1
-      return { x: v.x / len, y: v.y / len }
-    }
-
-    // Helper: detect sharp corner (threshold: 68-112 degrees)
-    const isSharpCorner = (p0: Point, p1: Point, p2: Point): boolean => {
-      const v1 = normalize({ x: p1.x - p0.x, y: p1.y - p0.y })
-      const v2 = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
-      const angle = Math.abs(angleBetween(v1, v2)) * (180 / Math.PI)
-      return angle >= 68 && angle <= 112
-    }
-
-    // Build segments with directional continuity
-    let currentDirection: Point | null = null
-
-    const isClosedPath = pts.length > 2 && pts[0].x === pts[pts.length - 1].x && pts[0].y === pts[pts.length - 1].y
-
-    for (let i = 0; i < pts.length - 1; i++) {
-      const p1 = pts[i]
-      const p2 = pts[i + 1]
-      const p0 = i > 0 ? pts[i - 1] : null
-      const p3 = i < pts.length - 2 ? pts[i + 2] : (isClosedPath ? pts[0] : null)
-
-      // Check for sharp corner that needs rounding
-      if (p0 && p3 && isSharpCorner(p0, p1, p2)) {
-        // Round the corner - path doesn't go through p1
-        const v1 = normalize({ x: p1.x - p0.x, y: p1.y - p0.y })
-        const v2 = normalize({ x: p3.x - p2.x, y: p2.y - p3.y })
-        
-        // Control points for smooth rounded corner
-        const dist = this.distance(p1, p2) * 0.4
-        const cp1 = { x: p1.x + v1.x * dist, y: p1.y + v1.y * dist }
-        const cp2 = { x: p2.x - v2.x * dist, y: p2.y - v2.y * dist }
-
-        segments.push({
-          pathId: path.id,
-          segmentIndex: i,
-          p0: p1,
-          p1: p2,
-          cp1,
-          cp2
-        })
-
-        currentDirection = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
-        continue
-      }
-
-      // Determine incoming direction
-      if (currentDirection === null) {
-        // First segment: use direction toward second point
-        currentDirection = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
-      }
-
-      // Determine outgoing direction (toward next point)
-      const targetDirection = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
-      
-      // Check for straight or diagonal segments
-      const dx = Math.abs(p2.x - p1.x)
-      const dy = Math.abs(p2.y - p1.y)
-      const isHorizontal = dy < 1
-      const isVertical = dx < 1
-      const isDiagonal = Math.abs(dx - dy) < 2
-
-      let cp1: Point
-      let cp2: Point
-      let shouldBeArc = false
-
-      if (isHorizontal || isVertical) {
-        // Straight line: control points must lie on the segment for perfect straightness
-        const segLen = this.distance(p1, p2)
-        const offset = segLen * 0.33
-        // Place control points on the actual line between p1 and p2
-        const lineDir = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
-        cp1 = { x: p1.x + lineDir.x * offset, y: p1.y + lineDir.y * offset }
-        cp2 = { x: p2.x - lineDir.x * offset, y: p2.y - lineDir.y * offset }
-      } else if (isDiagonal) {
-        // Diagonal: render as arc and determine direction from path curvature
-        // Calculate cross product to determine turn direction
-        let arcCounterclockwise = false
-        if (p0 && p3) {
-          // Cross product of (p1-p0) × (p2-p1)
-          const v1 = { x: p1.x - p0.x, y: p1.y - p0.y }
-          const v2 = { x: p2.x - p1.x, y: p2.y - p1.y }
-          const crossProduct = v1.x * v2.y - v1.y * v2.x
-          // Canvas Y+ downward: invert to treat CW as positive
-          arcCounterclockwise = crossProduct < 0
-        }
-        
-        cp1 = p1
-        cp2 = p2
-        
-        segments.push({
-          pathId: path.id,
-          segmentIndex: i,
-          p0: p1,
-          p1: p2,
-          cp1,
-          cp2,
-          isCircularArc: true,
-          arcTurnsCounterclockwise: arcCounterclockwise
-        })
-        
-        currentDirection = targetDirection
-        continue
-      } else {
-        // General curve with C1 continuity
-        const dist = this.distance(p1, p2) * 0.4
-        cp1 = { x: p1.x + currentDirection.x * dist, y: p1.y + currentDirection.y * dist }
-        
-        // Exit direction at p2
-        if (p3) {
-          const nextDir = normalize({ x: p3.x - p2.x, y: p3.y - p2.y })
-          // Average of incoming and outgoing for smooth transition
-          const exitDir = normalize({ 
-            x: targetDirection.x + nextDir.x, 
-            y: targetDirection.y + nextDir.y 
-          })
-          cp2 = { x: p2.x - exitDir.x * dist, y: p2.y - exitDir.y * dist }
-        } else {
-          cp2 = { x: p2.x - targetDirection.x * dist, y: p2.y - targetDirection.y * dist }
-        }
-      }
-
-      segments.push({
-        pathId: path.id,
-        segmentIndex: i,
-        p0: p1,
-        p1: p2,
-        cp1,
-        cp2,
-        isCircularArc: shouldBeArc
-      })
-
-      // Update current direction for next segment
-      currentDirection = targetDirection
-    }
-
-    return segments
+  private buildPathSegments(path: Path): DrawableSegment[] {
+    // Use the shared buildSegments function from segment-builder.ts
+    // This ensures IDENTICAL rendering between web app and test output
+    return buildSegments(path, (p) => this.toCanvasPoint(p))
   }
 
   private clampHandle(anchor: Point, control: Point, maxLen: number): Point {

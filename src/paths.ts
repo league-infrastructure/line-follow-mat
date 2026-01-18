@@ -1,6 +1,7 @@
-import { GridPoint, Path } from './types'
+import { GridPoint, Path, Point } from './types'
 import { createCanvas } from 'canvas'
-import { DrawContext, getSegmentDrawer, SegmentType } from './draw'
+import { drawArc } from './arc-utils'
+import { buildSegments } from './segment-builder'
 
 // Type definitions for canvas operations
 interface CanvasPoint {
@@ -365,74 +366,65 @@ export function renderPathsCurvedToCanvas(
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
-  // Create draw context
-  const drawContext: DrawContext = {
-    ctx: ctx as any,
-    gridSpacingPx,
-    originX: origin.x,
-    originY: origin.y
-  }
+  // Helper function to convert grid point to canvas coordinates
+  const toCanvasPoint = (p: Point): Point => ({
+    x: origin.x + p.x * gridSpacingPx,
+    y: origin.y + p.y * gridSpacingPx
+  })
 
-  let globalSegmentNumber = 1
   for (const path of paths) {
     const points = path.points
     if (points.length < 2) continue
 
-    // Get netlist segments to know the segment types
-    const netSegs = buildNetlistSegments(path)
+    // Use the SHARED buildSegments function (same as web app canvas.ts)
+    // This ensures IDENTICAL rendering between web app and test output
+    const segs = buildSegments(path, toCanvasPoint)
 
     if (straightLineMode) {
-      // Draw path as a continuous curve for straight lines
+      // Draw path as straight lines (for straight line mode)
       ctx.beginPath()
-      if (points.length > 0) {
-        ctx.moveTo(origin.x + points[0].x * gridSpacingPx, origin.y + points[0].y * gridSpacingPx)
+      if (segs.length > 0) {
+        ctx.moveTo(segs[0].p0.x, segs[0].p0.y)
       }
 
-      for (let i = 0; i < netSegs.length; i++) {
-        const seg = netSegs[i]
-        const x1 = origin.x + seg.xEnd * gridSpacingPx
-        const y1 = origin.y + seg.yEnd * gridSpacingPx
-        ctx.lineTo(x1, y1)
+      for (const seg of segs) {
+        ctx.lineTo(seg.p1.x, seg.p1.y)
       }
       ctx.stroke()
+
+      // Draw arrows and labels in straight line mode
+      ctx.fillStyle = pathColor
+      for (let i = 0; i < segs.length; i++) {
+        const seg = segs[i]
+        drawArrowHead(ctx, seg.p0.x, seg.p0.y, seg.p1.x, seg.p1.y, 10)
+        drawSegmentLabel(ctx, seg.p0.x, seg.p0.y, seg.p1.x, seg.p1.y, i + 1)
+      }
     } else {
-      // Draw each segment separately with its own random color
-      for (let i = 0; i < netSegs.length; i++) {
-        const seg = netSegs[i]
-        const prior = i > 0 ? netSegs[i - 1] : null
-        const next = i < netSegs.length - 1 ? netSegs[i + 1] : null
+      // Draw each segment with its own random color
+      // Uses the SAME rendering logic as canvas.ts paintPaths()
+      for (let i = 0; i < segs.length; i++) {
+        const seg = segs[i]
 
         // Generate random color for this segment
         const randomColor = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')
-        const contextWithColor = { ...drawContext, color: randomColor }
+        ctx.strokeStyle = randomColor
         
         // Begin path for this segment
         ctx.beginPath()
-        const x0 = origin.x + seg.xStart * gridSpacingPx
-        const y0 = origin.y + seg.yStart * gridSpacingPx
-        ctx.moveTo(x0, y0)
+        ctx.moveTo(seg.p0.x, seg.p0.y)
         
-        // Draw the segment
-        const drawer = getSegmentDrawer(seg.lineType)
-        drawer(contextWithColor, prior, seg, next)
+        // Draw the segment using the SAME logic as canvas.ts paintPaths()
+        if (seg.isCircularArc) {
+          // Draw a perfect circular arc using shared utility
+          const counterclockwise = seg.arcTurnsCounterclockwise ?? false
+          drawArc(ctx as any, seg.p0.x, seg.p0.y, seg.p1.x, seg.p1.y, counterclockwise)
+        } else {
+          // Draw a bezier curve (handles both straight lines and curves)
+          ctx.bezierCurveTo(seg.cp1.x, seg.cp1.y, seg.cp2.x, seg.cp2.y, seg.p1.x, seg.p1.y)
+        }
         
         // Stroke this segment with its color
         ctx.stroke()
-      }
-    }
-
-    // Draw arrows and labels if in straight line mode
-    if (straightLineMode) {
-      ctx.fillStyle = pathColor
-      for (const seg of netSegs) {
-        const canvasP0X = origin.x + seg.xStart * gridSpacingPx
-        const canvasP0Y = origin.y + seg.yStart * gridSpacingPx
-        const canvasP1X = origin.x + seg.xEnd * gridSpacingPx
-        const canvasP1Y = origin.y + seg.yEnd * gridSpacingPx
-
-        drawArrowHead(ctx, canvasP0X, canvasP0Y, canvasP1X, canvasP1Y, 10)
-        drawSegmentLabel(ctx, canvasP0X, canvasP0Y, canvasP1X, canvasP1Y, globalSegmentNumber)
-        globalSegmentNumber++
       }
     }
   }

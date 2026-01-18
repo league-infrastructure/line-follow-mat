@@ -7,6 +7,9 @@ export interface GridPoint {
   y: number
 }
 
+// Alias for GridPoint for use in canvas coordinate contexts
+export type Point = GridPoint
+
 export interface Path {
   id: string
   points: GridPoint[]
