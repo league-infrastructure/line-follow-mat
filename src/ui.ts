@@ -94,6 +94,7 @@ export class UIController {
 
     this.iconPopup.querySelectorAll('.icon-popup-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
+        e.stopPropagation()  // Prevent document click handler from interfering
         const iconType = (e.currentTarget as HTMLButtonElement).dataset.icon
         const icon = iconType === 'null' ? null : iconType as PointIconType
         if (this.onIconSelect) {

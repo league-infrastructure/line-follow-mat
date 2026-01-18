@@ -77,7 +77,6 @@ export class CanvasView {
     this.paintBackground()
     this.paintGrid()
     this.paintPaths(paths)
-    this.paintIcons(paths)
     
     if (this.straightLineMode) {
       this.paintSegmentLabels(paths)
@@ -92,6 +91,9 @@ export class CanvasView {
     if (selection.kind === 'segment' || selection.kind === 'path' || selection.kind === 'point') {
       this.paintPathPoints(paths, draggedPoint, selection)
     }
+    
+    // Paint icons last so they appear on top of everything
+    this.paintIcons(paths)
 
     this.ctx.restore()
   }
@@ -286,14 +288,16 @@ export class CanvasView {
   private drawIcon(x: number, y: number, iconType: import('./types').PointIconType) {
     if (!this.ctx || !iconType) return
     
-    // Icon size fills most of a grid cell
-    const size = this.gridSpacingPx * 0.8
+    // Icon size - about 1.6x a grid cell (doubled from 0.8)
+    const size = this.gridSpacingPx * 1.6
     const halfSize = size / 2
     
-    // Draw white shadow/outline first
+    // Draw white background/shadow first for visibility
     this.ctx.save()
-    this.ctx.shadowColor = 'rgba(255, 255, 255, 0.9)'
-    this.ctx.shadowBlur = 8
+    
+    // Strong white glow effect
+    this.ctx.shadowColor = 'rgba(255, 255, 255, 1)'
+    this.ctx.shadowBlur = 12
     this.ctx.shadowOffsetX = 0
     this.ctx.shadowOffsetY = 0
     

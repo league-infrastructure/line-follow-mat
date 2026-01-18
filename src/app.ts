@@ -141,7 +141,10 @@ export class LineFollowerApp {
     const path = this.paths.find(p => p.id === sel.pathId)
     if (!path) return
     
-    const currentIcon = path.icons?.get(sel.pointIndex) ?? null
+    // Copy values to avoid closure issues if selection changes
+    const pathId = sel.pathId
+    const pointIndex = sel.pointIndex
+    const currentIcon = path.icons?.get(pointIndex) ?? null
     
     // Get position relative to canvas wrapper
     const wrapper = (this.canvas['canvas'] as HTMLCanvasElement).parentElement
@@ -151,7 +154,7 @@ export class LineFollowerApp {
     const y = e.clientY - wrapperRect.top
     
     this.ui.showIconPopup(x, y, currentIcon, (icon) => {
-      this.setPointIcon(sel.pathId, sel.pointIndex, icon)
+      this.setPointIcon(pathId, pointIndex, icon)
     })
   }
 
@@ -177,8 +180,14 @@ export class LineFollowerApp {
     const x = (e.clientX - rect.left) * (this.canvas['deviceScale'] || 1)
     const y = (e.clientY - rect.top) * (this.canvas['deviceScale'] || 1)
     
-    // Check if we're clicking on a highlighted path point (when segment/path is selected)
-    if (this.selection.kind === 'segment' || this.selection.kind === 'path' || this.selection.kind === 'point') {
+    // When in 'path' mode (actively adding segments), don't intercept point clicks
+    // This allows closing a loop by clicking on an existing point
+    if (this.selection.kind === 'path') {
+      return
+    }
+    
+    // Check if we're clicking on a highlighted path point (when segment or point is selected)
+    if (this.selection.kind === 'segment' || this.selection.kind === 'point') {
       const selectedPathId = this.selection.pathId
       const path = this.paths.find(p => p.id === selectedPathId)
       if (path) {
@@ -517,8 +526,6 @@ export class LineFollowerApp {
       const pathStrings = encoded.split(',').filter(s => s.length > 0)
       const paths: Path[] = []
 
-      console.log('Decoding paths:', pathStrings)
-
       for (const pathStr of pathStrings) {
         // Split by ! to separate points from icons
         const [pointsStr, iconsStr] = pathStr.split('!')
@@ -532,10 +539,8 @@ export class LineFollowerApp {
         for (let i = 0; i < pointsStr.length; i += 2) {
           const pair = pointsStr.slice(i, i + 2)
           const index = base62ToIndex(pair)
-          console.log(`Pair "${pair}" -> index ${index}`)
           if (index >= 0 && index < GRID_SIZE * GRID_SIZE) {
             const pt = indexToPoint(index)
-            console.log(`  -> point (${pt.x}, ${pt.y})`)
             points.push(pt)
           } else {
             console.warn(`Invalid index ${index} for pair "${pair}"`)
@@ -558,13 +563,11 @@ export class LineFollowerApp {
           if (icons.size === 0) icons = undefined
         }
         
-        console.log('Path points:', points)
         if (points.length >= 2) {
           paths.push({ id: crypto.randomUUID(), points, icons })
         }
       }
 
-      console.log('Decoded paths:', paths)
       return paths
     } catch (err) {
       console.error('Failed to decode design', err)

@@ -40,4 +40,7 @@ tests:
   - name: wobble
     url: http://localhost:5173/?g=262A1n2d3R4E3o3O3J2s2T26
 
+  - name: with_icons
+    url: http://localhost:5173/?g=00011G1F1E!0P3S5O
+
   

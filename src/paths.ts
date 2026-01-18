@@ -1,5 +1,5 @@
 import { GRID_POINTS, GRID_SPACING_INCHES, LINE_WIDTH_INCHES } from './config'
-import { GridPoint, Path, Point } from './types'
+import { GridPoint, Path, Point, PointIconType, PointIcons } from './types'
 import { createCanvas } from 'canvas'
 import { drawArc, calculateArcParams } from './arc-utils'
 import { buildSegments } from './segment-builder'
@@ -30,10 +30,17 @@ export interface NetlistSegment {
  * Decode a URL parameter into paths
  * Uses base62 encoding where each pair of characters represents x,y grid coordinates
  * Multiple paths can be separated by commas
+ * Icons are encoded after ! separator: !<index><iconChar>...
  */
 export function decodeDesignFromUrl(encoded: string): Path[] {
   const base62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
   const GRID_SIZE = 25
+  
+  // Icon character to type mapping
+  const charToIcon: Record<string, PointIconType> = {
+    'P': 'play', 'F': 'fastforward', 'S': 'stop',
+    'C': 'caution', 'O': 'circle', 'Q': 'square'
+  }
   
   const base62ToIndex = (s: string): number => {
     if (s.length !== 2) return -1
@@ -49,14 +56,19 @@ export function decodeDesignFromUrl(encoded: string): Path[] {
   const paths: Path[] = []
 
   for (const pathStr of pathStrings) {
-    if (pathStr.length % 2 !== 0) {
-      console.warn('Skipping path with odd length:', pathStr)
+    // Split by ! to separate points from icons
+    const parts = pathStr.split('!')
+    const pointsStr = parts[0]
+    const iconsStr = parts.length > 1 ? parts.slice(1).join('') : undefined
+    
+    if (pointsStr.length % 2 !== 0) {
+      console.warn('Skipping path with odd length:', pointsStr)
       continue
     }
     
     const points: GridPoint[] = []
-    for (let i = 0; i < pathStr.length; i += 2) {
-      const pair = pathStr.slice(i, i + 2)
+    for (let i = 0; i < pointsStr.length; i += 2) {
+      const pair = pointsStr.slice(i, i + 2)
       const index = base62ToIndex(pair)
       if (index >= 0 && index < GRID_SIZE * GRID_SIZE) {
         const pt = indexToPoint(index)
@@ -66,8 +78,24 @@ export function decodeDesignFromUrl(encoded: string): Path[] {
       }
     }
     
+    // Decode icons if present
+    let icons: PointIcons | undefined
+    if (iconsStr && iconsStr.length >= 2) {
+      icons = new Map()
+      for (let i = 0; i < iconsStr.length; i += 2) {
+        const idxChar = iconsStr[i]
+        const iconChar = iconsStr[i + 1]
+        const pointIdx = base62.indexOf(idxChar)
+        const iconType = charToIcon[iconChar]
+        if (pointIdx >= 0 && pointIdx < points.length && iconType) {
+          icons.set(pointIdx, iconType)
+        }
+      }
+      if (icons.size === 0) icons = undefined
+    }
+    
     if (points.length >= 2) {
-      paths.push({ id: crypto.randomUUID(), points })
+      paths.push({ id: crypto.randomUUID(), points, icons })
     }
   }
 
