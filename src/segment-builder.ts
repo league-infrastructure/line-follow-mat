@@ -79,6 +79,9 @@ function getArcDirection(prev: Point | null, p0: Point, p1: Point, next: Point |
 /**
  * Compute the tangent direction at the START of an arc (entering the arc)
  * For a circular arc, the tangent is perpendicular to the radius at that point.
+ * 
+ * In canvas coordinates (Y+ downward), visual "clockwise" is mathematical CCW.
+ * The tangent points in the direction of travel along the arc.
  */
 function getArcStartTangent(p0: Point, p1: Point, counterclockwise: boolean): Point {
   const arc = calculateArcParams(p0.x, p0.y, p1.x, p1.y, counterclockwise)
@@ -86,13 +89,17 @@ function getArcStartTangent(p0: Point, p1: Point, counterclockwise: boolean): Po
   // Vector from center to start point
   const radiusVec = { x: p0.x - arc.centerX, y: p0.y - arc.centerY }
   
-  // Tangent is perpendicular to radius
-  // CCW arc: rotate radius 90° CCW (-y, x)
-  // CW arc: rotate radius 90° CW (y, -x)
+  // Tangent is perpendicular to radius, in the direction of arc travel
+  // In canvas coords (Y+ down):
+  // - "counterclockwise" flag means visually CCW (mathematically CW)
+  // - For visually CCW (math CW): tangent = rotate radius 90° CW = (y, -x)
+  // - For visually CW (math CCW): tangent = rotate radius 90° CCW = (-y, x)
   if (counterclockwise) {
-    return normalize({ x: -radiusVec.y, y: radiusVec.x })
-  } else {
+    // Visually CCW arc: rotate radius CW to get tangent
     return normalize({ x: radiusVec.y, y: -radiusVec.x })
+  } else {
+    // Visually CW arc: rotate radius CCW to get tangent  
+    return normalize({ x: -radiusVec.y, y: radiusVec.x })
   }
 }
 
@@ -106,13 +113,11 @@ function getArcEndTangent(p0: Point, p1: Point, counterclockwise: boolean): Poin
   // Vector from center to end point
   const radiusVec = { x: p1.x - arc.centerX, y: p1.y - arc.centerY }
   
-  // Tangent is perpendicular to radius
-  // CCW arc: rotate radius 90° CCW (-y, x)
-  // CW arc: rotate radius 90° CW (y, -x)
+  // Same rotation logic as start tangent
   if (counterclockwise) {
-    return normalize({ x: -radiusVec.y, y: radiusVec.x })
-  } else {
     return normalize({ x: radiusVec.y, y: -radiusVec.x })
+  } else {
+    return normalize({ x: -radiusVec.y, y: radiusVec.x })
   }
 }
 
