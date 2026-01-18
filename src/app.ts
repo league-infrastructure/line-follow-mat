@@ -30,6 +30,11 @@ export class LineFollowerApp {
     this.bindMouse()
     this.restoreFromQuery()
     this.render()
+    
+    // Re-render after page fully loads to handle late CSS/layout changes
+    window.addEventListener('load', () => this.render())
+    // Also use requestAnimationFrame as a backup
+    requestAnimationFrame(() => this.render())
   }
 
   clearAll() {

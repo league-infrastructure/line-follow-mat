@@ -28,6 +28,7 @@ export class CanvasView {
   private straightLineMode = false
   private previewTarget: GridPoint | null = null
   private suppressNextClick = false
+  private buildingPath = false
 
   constructor(callbacks: CanvasCallbacks) {
     this.callbacks = callbacks
@@ -39,10 +40,23 @@ export class CanvasView {
 
     this.canvas = canvasEl
     this.ctx = canvasEl.getContext('2d')
+    
+    // Initial resize - may not have correct dimensions yet
     this.resizeToContainer()
 
     window.addEventListener('resize', () => this.handleResize())
     canvasEl.addEventListener('click', (ev) => this.handleClick(ev))
+    
+    // Re-render after layout is complete to handle cases where
+    // CSS hasn't finished computing dimensions
+    window.addEventListener('load', () => {
+      this.resizeToContainer()
+    })
+    
+    // Also try after a short delay in case fonts/CSS are still loading
+    requestAnimationFrame(() => {
+      this.resizeToContainer()
+    })
   }
 
   // Call this to prevent the next click from being processed
@@ -70,6 +84,8 @@ export class CanvasView {
     if (!this.canvas || !this.ctx) return
 
     this.lastSelection = selection
+    // Track if we're actively building a path (path or floating-point mode)
+    this.buildingPath = selection.kind === 'path' || selection.kind === 'floating-point'
     this.resizeToContainer()
     this.ctx.save()
     this.ctx.scale(this.deviceScale, this.deviceScale)
@@ -151,7 +167,16 @@ export class CanvasView {
     const x = (event.clientX - rect.left) * this.deviceScale
     const y = (event.clientY - rect.top) * this.deviceScale
 
-    // Check for segment hit FIRST - prioritize selecting existing paths over creating new points
+    // When building a path, check grid points FIRST so we can close loops
+    if (this.buildingPath) {
+      const pointHit = this.pickGridPoint(x, y)
+      if (pointHit) {
+        this.callbacks.onPoint(pointHit)
+        return
+      }
+    }
+
+    // Check for segment hit - prioritize selecting existing paths over creating new points
     // This makes it much easier to click on segments without accidentally creating new points
     const segmentHit = this.pickSegment(x, y)
     if (segmentHit) {
@@ -159,7 +184,7 @@ export class CanvasView {
       return
     }
 
-    // Only check for grid point if no segment was clicked
+    // Check for grid point if no segment was clicked
     const pointHit = this.pickGridPoint(x, y)
     if (pointHit) {
       this.callbacks.onPoint(pointHit)
