@@ -26,10 +26,15 @@ tests:
     url: http://localhost:5173/?g=02010P0o1E1F0r0S02
 
   - name: s_curve_2
-    url: http://localhost:5173/?g=00010R0r0s
+    url: http://localhost:5173/?g=0P0Q0q0S0T
 
   - name: sharp_square_3
     url: http://localhost:5173/?g=00031G1D00
 
-  - name: wide_curve:
+  - name: wide_curve
     url: http://localhost:5173/?g=0002040u1i2W
+
+  - name: pear_loop
+    url: http://localhost:5173/?g=0V0v1j293M3k3i3I251h0t0V
+
+  
