@@ -1,4 +1,5 @@
 import { GRID_POINTS, GridPoint, Path, SelectionState } from './types'
+import { drawArrowHead, drawSegmentLabel } from './paths'
 
 type Point = { x: number; y: number }
 
@@ -264,6 +265,14 @@ export class CanvasView {
         }
       }
       this.ctx.stroke()
+
+      // Draw arrows on segments if in straight line mode
+      if (this.straightLineMode) {
+        this.ctx.fillStyle = pathColor
+        for (const s of segs) {
+          drawArrowHead(this.ctx, s.p0.x, s.p0.y, s.p1.x, s.p1.y, 10)
+        }
+      }
     }
   }
 
@@ -277,36 +286,8 @@ export class CanvasView {
         const s = segs[i]
         const segmentNumber = i + 1
         
-        // Calculate midpoint of the segment
-        const midX = (s.p0.x + s.p1.x) / 2
-        const midY = (s.p0.y + s.p1.y) / 2
-        
-        // Prepare text
-        const text = String(segmentNumber)
-        
-        // Set up text rendering
-        this.ctx.font = 'bold 14px system-ui'
-        this.ctx.textAlign = 'center'
-        this.ctx.textBaseline = 'middle'
-        
-        // Get text metrics for background sizing
-        const metrics = this.ctx.measureText(text)
-        const textWidth = metrics.width
-        const textHeight = 16
-        const padding = 4
-        
-        // Draw white background
-        this.ctx.fillStyle = 'white'
-        this.ctx.fillRect(
-          midX - textWidth / 2 - padding,
-          midY - textHeight / 2 - padding / 2,
-          textWidth + padding * 2,
-          textHeight + padding
-        )
-        
-        // Draw text
-        this.ctx.fillStyle = '#161616'
-        this.ctx.fillText(text, midX, midY)
+        // Use shared drawing function from paths.ts
+        drawSegmentLabel(this.ctx, s.p0.x, s.p0.y, s.p1.x, s.p1.y, segmentNumber)
       }
     }
   }
