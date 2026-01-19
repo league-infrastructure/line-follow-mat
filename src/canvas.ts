@@ -1044,7 +1044,7 @@ export class CanvasView {
     }
   }
 
-  private paintSelection(paths: Path[], selection: SelectionState) {
+  private paintSelection(_paths: Path[], selection: SelectionState) {
     if (!this.ctx) return
 
     if (selection.kind === 'floating-point') {
