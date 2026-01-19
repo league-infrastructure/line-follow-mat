@@ -21,9 +21,9 @@ export class UIController {
       <div class="layout">
         <header class="toolbar">
           <div class="brand">
-            <span class="dot"></span>
+            <img class="brand-logo" src="https://images.jointheleague.org/logos/flag.png" alt="League logo" />
             <div>
-              <div class="title">Line Follower Sheet</div>
+              <div class="title">League Line Mat-O-Matic</div>
               <div class="subtitle">48" board · 2" grid</div>
             </div>
           </div>
