@@ -1,13 +1,14 @@
 {
   "name": "linefollow",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.20260119.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "tsx test/render-test.ts"
+    "test": "tsx test/render-test.ts",
+    "tag": "git tag -a v$(node -p \"require('./package.json').version\") -m \"Release v$(node -p \"require('./package.json').version\")\" && git push origin v$(node -p \"require('./package.json').version\")"
   },
   "dependencies": {
     "jspdf": "^2.5.1",

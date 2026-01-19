@@ -1,6 +1,6 @@
 import type { LineFollowerApp } from './app'
 import type { SelectionState, PointIconType } from './types'
-import { LOGO_URL, WEBSITE_URL, SLOGAN, TRACKING_PIXEL_URL, LEAGUE_LOGO_URL } from './config'
+import { LOGO_URL, WEBSITE_URL, SLOGAN, TRACKING_PIXEL_URL, LEAGUE_LOGO_URL, VERSION } from './config'
 import helpContent from '../help.md?raw'
 import { marked } from 'marked'
 
@@ -91,6 +91,7 @@ export class UIController {
                   </a>
                 </div>
               </div>
+              <div class="league-promo-version">v${VERSION}</div>
             </div>
           </aside>
 

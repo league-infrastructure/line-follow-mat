@@ -205,6 +205,13 @@ body {
   height: 14px;
 }
 
+.league-promo-version {
+  font-size: 10px;
+  color: #999;
+  text-align: center;
+  margin-top: 8px;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
