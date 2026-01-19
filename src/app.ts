@@ -463,7 +463,7 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
 
   shareDesign() {
     const url = this.getShareUrl()
-    const newUrl = `${window.location.pathname}?${new URL(url).search}`
+    const newUrl = `${window.location.pathname}${new URL(url).search}`
     window.history.replaceState({}, '', newUrl)
     navigator.clipboard.writeText(url)
     
