@@ -4,6 +4,7 @@ import { GridPoint, Path, SelectionState } from './types'
 import { BOARD_INCHES, GRID_SPACING_INCHES, GRID_POINTS, LINE_WIDTH_INCHES, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT, WEBSITE_URL, SLOGAN, LOGO_URL } from './config'
 import { buildSegments } from './segment-builder'
 import { calculateArcParams } from './arc-utils'
+// import { generateMaze } from './maze'
 
 type Endpoint = 'start' | 'end'
 
@@ -112,6 +113,10 @@ export class LineFollowerApp {
 
   getSlogan(): string {
     return this.customSlogan || SLOGAN
+  }
+
+  hasAnyPaths(): boolean {
+    return this.paths.length > 0
   }
 
   clearAll() {

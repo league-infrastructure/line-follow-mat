@@ -141,6 +141,70 @@ body {
   margin-bottom: 8px;
 }
 
+.league-promo {
+  margin-top: auto;
+  display: flex;
+  gap: 12px;
+  background: white;
+  border-radius: 14px;
+  padding: 14px;
+  color: #f57c00;
+}
+
+.league-promo-logo {
+  width: 80px;
+  height: auto;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.league-promo-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.league-promo-name {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.league-promo-slogan {
+  font-size: 11px;
+  opacity: 0.9;
+  line-height: 1.3;
+}
+
+.league-promo-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 6px;
+}
+
+.league-promo-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #f57c00;
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.95;
+}
+
+.league-promo-links a:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.league-promo-links .github-icon {
+  width: 14px;
+  height: 14px;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
