@@ -596,3 +596,157 @@ body {
     transform: translateX(-50%) translateY(0);
   }
 }
+
+/* Responsive styles for smaller screens */
+@media (max-width: 1024px) {
+  .layout {
+    padding: 10px;
+    gap: 10px;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 14px;
+  }
+
+  .brand {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .title {
+    font-size: 18px;
+  }
+
+  .actions {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .btn {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .content {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* Hide Controls and Branding on mobile */
+  .side .panel:nth-child(3),
+  .side .panel:nth-child(4) {
+    display: none;
+  }
+
+  /* Reorder: canvas first, then sidebar content */
+  .side {
+    order: 2;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* Canvas wrapper gets explicit height based on viewport */
+  .canvas-wrap {
+    order: 1;
+    width: 100%;
+    height: calc(100vw - 20px); /* Square-ish based on viewport width */
+    max-height: calc(100vh - 220px); /* Leave room for toolbar and info panels */
+    min-height: 300px;
+  }
+
+  /* Make Selection and Segment Info inline */
+  .side .panel {
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .side .panel-title {
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+
+  .pill {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  /* Attribution takes full width at bottom */
+  .league-promo {
+    order: 3;
+    width: 100%;
+    flex: none;
+    margin-top: 0;
+  }
+
+  .board-title {
+    font-size: 14px;
+    padding: 6px 12px;
+    min-width: 150px;
+  }
+}
+
+/* Even smaller screens */
+@media (max-width: 600px) {
+  .layout {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .toolbar {
+    padding: 8px 10px;
+  }
+
+  .brand .brand-logo {
+    width: 32px;
+    height: 32px;
+  }
+
+  .title {
+    font-size: 16px;
+  }
+
+  .board-size-select {
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+
+  .btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .canvas-wrap {
+    height: calc(100vw - 16px);
+    max-height: calc(100vh - 260px);
+    min-height: 250px;
+  }
+
+  .league-promo {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .league-promo-left {
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .league-promo-logo {
+    max-height: 40px;
+  }
+
+  .league-promo-links {
+    justify-content: center;
+  }
+}

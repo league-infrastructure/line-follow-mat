@@ -499,14 +499,19 @@ export class CanvasView {
 
   private handleResize() {
     this.resizeToContainer()
+    // Trigger re-render after resize so the canvas isn't blank
+    if (this.renderCallback) {
+      this.renderCallback()
+    }
   }
 
   private resizeToContainer() {
     if (!this.canvas) return
 
     const parent = this.canvas.parentElement
-    const cssWidth = Math.max(640, parent?.clientWidth ?? 800)
-    const cssHeight = Math.max(640, parent?.clientHeight ?? 800)
+    // Use parent dimensions, with minimum of 300px for very small screens
+    const cssWidth = Math.max(300, parent?.clientWidth ?? 800)
+    const cssHeight = Math.max(300, parent?.clientHeight ?? 800)
     this.deviceScale = window.devicePixelRatio || 1
 
     this.canvas.style.width = `${cssWidth}px`
