@@ -25,7 +25,8 @@ export const TRACKING_PIXEL_URL = 'https://analytics.jtlapp.net/p/rUrCcWcRy'
 export const ANALYTICS_SCRIPT_URL = 'https://analytics.jtlapp.net/script.js'
 export const ANALYTICS_WEBSITE_ID = '9fa41ba0-8933-4e47-8228-0f90644372e3'
 
-// Version
-export const VERSION = '1.0.0'
+// Version (injected by Vite from package.json, fallback for tests)
+declare const __APP_VERSION__: string | undefined
+export const VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
 
 

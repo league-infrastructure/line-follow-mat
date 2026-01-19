@@ -79,7 +79,10 @@ export class UIController {
               </div>
             </div>
             <div class="league-promo">
-              <img src="${LEAGUE_LOGO_URL}" alt="The League" class="league-promo-logo" />
+              <div class="league-promo-left">
+                <img src="${LEAGUE_LOGO_URL}" alt="The League" class="league-promo-logo" />
+                <span class="league-promo-version">v${VERSION}</span>
+              </div>
               <div class="league-promo-text">
                 <div class="league-promo-name">The League of Amazing Programmers</div>
                 <div class="league-promo-slogan">Igniting Young Minds Through Coding</div>
@@ -91,7 +94,6 @@ export class UIController {
                   </a>
                 </div>
               </div>
-              <div class="league-promo-version">v${VERSION}</div>
             </div>
           </aside>
 
