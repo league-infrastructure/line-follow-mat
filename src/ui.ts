@@ -191,6 +191,21 @@ export class UIController {
     }
   }
 
+  setBoardSizeCustom(width: number, height: number, gridSpacing: number) {
+    const select = document.getElementById('board-size-select') as HTMLSelectElement
+    if (!select) return
+    
+    // Check if custom option already exists
+    let customOption = select.querySelector('option[value=\"-1\"]') as HTMLOptionElement
+    if (!customOption) {
+      customOption = document.createElement('option')
+      customOption.value = '-1'
+      select.appendChild(customOption)
+    }
+    customOption.textContent = `${width}" × ${height}" · ${gridSpacing}" grid (Custom)`
+    select.value = '-1'
+  }
+
   showIconPopup(x: number, y: number, currentIcon: PointIconType, onSelect: (icon: PointIconType) => void) {
     if (!this.iconPopup) return
 

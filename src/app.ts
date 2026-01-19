@@ -1,7 +1,7 @@
 import { CanvasView, SegmentHit } from './canvas'
 import { UIController } from './ui'
 import { GridPoint, Path, SelectionState } from './types'
-import { BOARD_INCHES, GRID_SPACING_INCHES, GRID_POINTS, LINE_WIDTH_INCHES, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT, WEBSITE_URL, SLOGAN, LOGO_URL, BOARD_WIDTH_INCHES, BOARD_HEIGHT_INCHES, GRID_POINTS_X, GRID_POINTS_Y, setBoardSize as setConfigBoardSize, BOARD_SIZES } from './config'
+import { GRID_SPACING_INCHES, GRID_POINTS, LINE_WIDTH_INCHES, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT, WEBSITE_URL, SLOGAN, LOGO_URL, BOARD_WIDTH_INCHES, BOARD_HEIGHT_INCHES, GRID_POINTS_X, GRID_POINTS_Y, setBoardSize as setConfigBoardSize, setCustomBoardSize as setCustomBoardSizeConfig, BOARD_SIZES } from './config'
 import { buildSegments } from './segment-builder'
 import { calculateArcParams } from './arc-utils'
 // import { generateMaze } from './maze'
@@ -42,6 +42,22 @@ const indexToBase62 = (n: number): string => {
 const base62ToIndex = (s: string): number => {
   if (s.length < 2) return -1
   return BASE62.indexOf(s[0]) * 62 + BASE62.indexOf(s[1])
+}
+// Single digit base62
+const toBase62Digit = (n: number): string => BASE62[Math.min(61, Math.max(0, n))]
+const fromBase62Digit = (c: string): number => BASE62.indexOf(c)
+
+// Board size encoding: 2 digits width + 2 digits height + 1 digit grid spacing = 5 chars
+const encodeBoardSize = (width: number, height: number, gridSpacing: number): string => {
+  return indexToBase62(width) + indexToBase62(height) + toBase62Digit(gridSpacing)
+}
+const decodeBoardSize = (s: string): { width: number; height: number; gridSpacing: number } | null => {
+  if (s.length < 5) return null
+  const width = base62ToIndex(s.slice(0, 2))
+  const height = base62ToIndex(s.slice(2, 4))
+  const gridSpacing = fromBase62Digit(s[4])
+  if (width <= 0 || height <= 0 || gridSpacing <= 0) return null
+  return { width, height, gridSpacing }
 }
 
 export class LineFollowerApp {
@@ -433,6 +449,15 @@ ${Array.from({ length: GRID_POINTS_Y }, (_, y) =>
     this.currentBoardSizeIndex = index
     setConfigBoardSize(index)
     this.canvas.updateBoardSize()
+    this.ui.setBoardSizeIndex(index)
+    this.render()
+  }
+
+  setCustomBoardSize(width: number, height: number, gridSpacing: number) {
+    this.currentBoardSizeIndex = -1 // Custom
+    setCustomBoardSizeConfig(width, height, gridSpacing)
+    this.canvas.updateBoardSize()
+    this.ui.setBoardSizeCustom(width, height, gridSpacing)
     this.render()
   }
 
@@ -456,6 +481,8 @@ ${Array.from({ length: GRID_POINTS_Y }, (_, y) =>
     const encoded = this.encodeDesign()
     const params = new URLSearchParams()
     params.set('g', encoded)
+    // Encode board size: width, height, grid spacing
+    params.set('z', encodeBoardSize(BOARD_WIDTH_INCHES, BOARD_HEIGHT_INCHES, GRID_SPACING_INCHES))
     if (this.title) {
       params.set('t', this.title)
     }
@@ -1025,11 +1052,29 @@ ${Array.from({ length: GRID_POINTS_Y }, (_, y) =>
   private restoreFromQuery() {
     const params = new URLSearchParams(window.location.search)
     const encoded = params.get('g')
+    const sizeEncoded = params.get('z')
     const title = params.get('t')
     const legendPosEncoded = params.get('l')
     const logoUrl = params.get('i')
     const websiteUrl = params.get('u')
     const slogan = params.get('s')
+    
+    // Restore board size first (before loading design)
+    if (sizeEncoded) {
+      const size = decodeBoardSize(sizeEncoded)
+      if (size) {
+        // Find matching preset or set custom
+        const presetIndex = BOARD_SIZES.findIndex(
+          s => s.width === size.width && s.height === size.height && s.gridSpacing === size.gridSpacing
+        )
+        if (presetIndex >= 0) {
+          this.setBoardSize(presetIndex)
+        } else {
+          // Custom size - set directly
+          this.setCustomBoardSize(size.width, size.height, size.gridSpacing)
+        }
+      }
+    }
     
     if (encoded) {
       this.loadDesign(encoded)

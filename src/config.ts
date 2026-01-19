@@ -33,13 +33,24 @@ export let GRID_POINTS_Y = BOARD_HEIGHT_INCHES / GRID_SPACING_INCHES + 1
 export let BOARD_INCHES = Math.max(BOARD_WIDTH_INCHES, BOARD_HEIGHT_INCHES)
 export let GRID_POINTS = Math.max(GRID_POINTS_X, GRID_POINTS_Y)
 
-// Function to update board dimensions
+// Function to update board dimensions from preset
 export function setBoardSize(sizeIndex: number) {
   const size = BOARD_SIZES[sizeIndex]
   if (!size) return
   BOARD_WIDTH_INCHES = size.width
   BOARD_HEIGHT_INCHES = size.height
   GRID_SPACING_INCHES = size.gridSpacing
+  GRID_POINTS_X = BOARD_WIDTH_INCHES / GRID_SPACING_INCHES + 1
+  GRID_POINTS_Y = BOARD_HEIGHT_INCHES / GRID_SPACING_INCHES + 1
+  BOARD_INCHES = Math.max(BOARD_WIDTH_INCHES, BOARD_HEIGHT_INCHES)
+  GRID_POINTS = Math.max(GRID_POINTS_X, GRID_POINTS_Y)
+}
+
+// Function to set custom board dimensions
+export function setCustomBoardSize(width: number, height: number, gridSpacing: number) {
+  BOARD_WIDTH_INCHES = width
+  BOARD_HEIGHT_INCHES = height
+  GRID_SPACING_INCHES = gridSpacing
   GRID_POINTS_X = BOARD_WIDTH_INCHES / GRID_SPACING_INCHES + 1
   GRID_POINTS_Y = BOARD_HEIGHT_INCHES / GRID_SPACING_INCHES + 1
   BOARD_INCHES = Math.max(BOARD_WIDTH_INCHES, BOARD_HEIGHT_INCHES)

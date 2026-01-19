@@ -1,4 +1,4 @@
-import { GRID_POINTS, GRID_SPACING_INCHES, LINE_WIDTH_INCHES, LOGO_URL, WEBSITE_URL, SLOGAN, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT, GRID_POINTS_X, GRID_POINTS_Y, BOARD_WIDTH_INCHES, BOARD_HEIGHT_INCHES } from './config'
+import { GRID_SPACING_INCHES, LINE_WIDTH_INCHES, LOGO_URL, WEBSITE_URL, SLOGAN, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT, GRID_POINTS_X, GRID_POINTS_Y } from './config'
 import { GridPoint, Path, Point, SelectionState, Corner } from './types'
 import { drawArrowHead, drawSegmentLabel } from './paths'
 import { drawArc, calculateArcParams } from './arc-utils'
@@ -242,8 +242,8 @@ export class CanvasView {
       const gridY = Math.round((this.legendDragPosition.y - this.origin.y) / this.gridSpacingPx)
       
       // Clamp to valid range
-      const maxX = GRID_POINTS - 1 - TITLE_BOX_WIDTH
-      const maxY = GRID_POINTS - 1 - TITLE_BOX_HEIGHT
+      const maxX = GRID_POINTS_X - 1 - TITLE_BOX_WIDTH
+      const maxY = GRID_POINTS_Y - 1 - TITLE_BOX_HEIGHT
       const clampedX = Math.max(0, Math.min(maxX, gridX))
       const clampedY = Math.max(0, Math.min(maxY, gridY))
       
@@ -319,8 +319,8 @@ export class CanvasView {
       const gridY = Math.round((this.legendDragPosition.y - this.origin.y) / this.gridSpacingPx)
       
       // Clamp to valid range
-      const maxX = GRID_POINTS - 1 - TITLE_BOX_WIDTH
-      const maxY = GRID_POINTS - 1 - TITLE_BOX_HEIGHT
+      const maxX = GRID_POINTS_X - 1 - TITLE_BOX_WIDTH
+      const maxY = GRID_POINTS_Y - 1 - TITLE_BOX_HEIGHT
       const clampedX = Math.max(0, Math.min(maxX, gridX))
       const clampedY = Math.max(0, Math.min(maxY, gridY))
       
@@ -385,7 +385,7 @@ export class CanvasView {
   pickGridPoint(x: number, y: number): GridPoint | null {
     const gx = Math.round((x / this.deviceScale - this.origin.x) / this.gridSpacingPx)
     const gy = Math.round((y / this.deviceScale - this.origin.y) / this.gridSpacingPx)
-    if (gx < 0 || gy < 0 || gx >= GRID_POINTS || gy >= GRID_POINTS) return null
+    if (gx < 0 || gy < 0 || gx >= GRID_POINTS_X || gy >= GRID_POINTS_Y) return null
 
     const candidate = this.toCanvasPoint({ x: gx, y: gy })
     const dx = candidate.x - x / this.deviceScale
@@ -479,6 +479,16 @@ export class CanvasView {
   }
 
   updateBoardSize() {
+    // Clamp legend position to new board bounds if needed
+    if (this.legendPosition) {
+      const maxX = GRID_POINTS_X - 1 - TITLE_BOX_WIDTH
+      const maxY = GRID_POINTS_Y - 1 - TITLE_BOX_HEIGHT
+      const clampedX = Math.max(0, Math.min(maxX, this.legendPosition.x))
+      const clampedY = Math.max(0, Math.min(maxY, this.legendPosition.y))
+      if (clampedX !== this.legendPosition.x || clampedY !== this.legendPosition.y) {
+        this.legendPosition = { x: clampedX, y: clampedY }
+      }
+    }
     // Force recalculation of grid dimensions
     this.resizeToContainer()
   }
@@ -582,13 +592,13 @@ export class CanvasView {
         minX = 0; maxX = boxWidth; minY = 0; maxY = boxHeight
         break
       case 'top-right':
-        minX = GRID_POINTS - 1 - boxWidth; maxX = GRID_POINTS - 1; minY = 0; maxY = boxHeight
+        minX = GRID_POINTS_X - 1 - boxWidth; maxX = GRID_POINTS_X - 1; minY = 0; maxY = boxHeight
         break
       case 'bottom-left':
-        minX = 0; maxX = boxWidth; minY = GRID_POINTS - 1 - boxHeight; maxY = GRID_POINTS - 1
+        minX = 0; maxX = boxWidth; minY = GRID_POINTS_Y - 1 - boxHeight; maxY = GRID_POINTS_Y - 1
         break
       case 'bottom-right':
-        minX = GRID_POINTS - 1 - boxWidth; maxX = GRID_POINTS - 1; minY = GRID_POINTS - 1 - boxHeight; maxY = GRID_POINTS - 1
+        minX = GRID_POINTS_X - 1 - boxWidth; maxX = GRID_POINTS_X - 1; minY = GRID_POINTS_Y - 1 - boxHeight; maxY = GRID_POINTS_Y - 1
         break
     }
     
@@ -646,16 +656,16 @@ export class CanvasView {
           boxY = this.origin.y
           break
         case 'top-right':
-          boxX = this.origin.x + (GRID_POINTS - 1) * this.gridSpacingPx - boxWidth
+          boxX = this.origin.x + (GRID_POINTS_X - 1) * this.gridSpacingPx - boxWidth
           boxY = this.origin.y
           break
         case 'bottom-left':
           boxX = this.origin.x
-          boxY = this.origin.y + (GRID_POINTS - 1) * this.gridSpacingPx - boxHeight
+          boxY = this.origin.y + (GRID_POINTS_Y - 1) * this.gridSpacingPx - boxHeight
           break
         case 'bottom-right':
-          boxX = this.origin.x + (GRID_POINTS - 1) * this.gridSpacingPx - boxWidth
-          boxY = this.origin.y + (GRID_POINTS - 1) * this.gridSpacingPx - boxHeight
+          boxX = this.origin.x + (GRID_POINTS_X - 1) * this.gridSpacingPx - boxWidth
+          boxY = this.origin.y + (GRID_POINTS_Y - 1) * this.gridSpacingPx - boxHeight
           break
       }
     }
@@ -1044,12 +1054,7 @@ export class CanvasView {
     }
 
     if (selection.kind === 'path') {
-      const path = paths.find((p) => p.id === selection.pathId)
-      if (!path || path.points.length === 0) return
-      const endIndex = selection.endpoint === 'end' ? path.points.length - 1 : 0
-      const pos = this.toCanvasPoint(path.points[endIndex])
-      // Selected endpoint is blue - this is where the next segment will be added from
-      this.drawHandle(pos.x, pos.y, '#2563eb')
+      // The selected endpoint is drawn by paintPathPoints at the end to be on top
       return
     }
 
@@ -1098,7 +1103,7 @@ export class CanvasView {
                         selection.pointIndex === i
       const isEndpoint = i === 0 || i === path.points.length - 1
       
-      // Skip the selected endpoint - it's drawn by paintSelection in blue
+      // Skip the selected endpoint - it's drawn at the end to be on top
       if (i === selectedEndpointIndex) {
         continue
       }
@@ -1131,6 +1136,12 @@ export class CanvasView {
         this.ctx.fill()
         this.ctx.stroke()
       }
+    }
+
+    // Draw the selected endpoint LAST so it appears on top (important for closed paths)
+    if (selectedEndpointIndex >= 0 && selectedEndpointIndex < path.points.length) {
+      const pos = this.toCanvasPoint(path.points[selectedEndpointIndex])
+      this.drawHandle(pos.x, pos.y, '#2563eb')
     }
   }
 
