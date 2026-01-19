@@ -1,7 +1,7 @@
 import { CanvasView, SegmentHit } from './canvas'
 import { UIController } from './ui'
 import { GridPoint, Path, SelectionState } from './types'
-import { BOARD_INCHES, GRID_SPACING_INCHES, GRID_POINTS, LINE_WIDTH_INCHES, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT, WEBSITE_URL, SLOGAN, LOGO_URL } from './config'
+import { BOARD_INCHES, GRID_SPACING_INCHES, GRID_POINTS, LINE_WIDTH_INCHES, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT, WEBSITE_URL, SLOGAN, LOGO_URL, BOARD_WIDTH_INCHES, BOARD_HEIGHT_INCHES, GRID_POINTS_X, GRID_POINTS_Y, setBoardSize as setConfigBoardSize, BOARD_SIZES } from './config'
 import { buildSegments } from './segment-builder'
 import { calculateArcParams } from './arc-utils'
 // import { generateMaze } from './maze'
@@ -141,20 +141,21 @@ export class LineFollowerApp {
     // Track download event
     this.trackEvent('download', { type: 'pdf', url: this.getShareUrl() })
     
-    // Create high-res canvas from SVG for 48"x48" at 150 DPI
+    // Create high-res canvas from SVG at 150 DPI
     const dpi = 150
-    const sizeInches = BOARD_INCHES
-    const sizePx = sizeInches * dpi  // 7200px
+    const widthPx = BOARD_WIDTH_INCHES * dpi
+    const heightPx = BOARD_HEIGHT_INCHES * dpi
     
-    const dataUrl = await this.renderSVGToDataURL(sizePx)
+    const dataUrl = await this.renderSVGToDataURL(widthPx, heightPx)
     
     const { jsPDF } = await import('jspdf')
-    // Create PDF at 48"x48" (points = inches * 72)
-    const sizePoints = sizeInches * 72  // 3456 points
+    // Create PDF (points = inches * 72)
+    const widthPoints = BOARD_WIDTH_INCHES * 72
+    const heightPoints = BOARD_HEIGHT_INCHES * 72
     const doc = new jsPDF({ 
-      orientation: 'portrait', 
+      orientation: BOARD_WIDTH_INCHES >= BOARD_HEIGHT_INCHES ? 'landscape' : 'portrait', 
       unit: 'pt', 
-      format: [sizePoints, sizePoints] 
+      format: [widthPoints, heightPoints] 
     })
 
     doc.addImage(
@@ -162,31 +163,32 @@ export class LineFollowerApp {
       'PNG',
       0,
       0,
-      sizePoints,
-      sizePoints,
+      widthPoints,
+      heightPoints,
       undefined,
       'FAST'
     )
-    doc.save('line-follower-board.pdf')
+    doc.save(`${this.getDownloadFilename()}.pdf`)
   }
 
   async downloadPNG() {
     // Track download event
     this.trackEvent('download', { type: 'png', url: this.getShareUrl() })
     
-    // Render at 150 DPI for 48"x48" = 7200x7200 pixels
+    // Render at 150 DPI
     const dpi = 150
-    const sizePx = BOARD_INCHES * dpi  // 7200px
+    const widthPx = BOARD_WIDTH_INCHES * dpi
+    const heightPx = BOARD_HEIGHT_INCHES * dpi
     
-    const dataUrl = await this.renderSVGToDataURL(sizePx)
+    const dataUrl = await this.renderSVGToDataURL(widthPx, heightPx)
     
     const link = document.createElement('a')
     link.href = dataUrl
-    link.download = 'line-follower-board.png'
+    link.download = `${this.getDownloadFilename()}.png`
     link.click()
   }
 
-  private renderSVGToDataURL(sizePx: number): Promise<string> {
+  private renderSVGToDataURL(widthPx: number, heightPx: number): Promise<string> {
     return new Promise((resolve, reject) => {
       const svg = this.generateSVG()
       const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
@@ -195,8 +197,8 @@ export class LineFollowerApp {
       const img = new Image()
       img.onload = () => {
         const canvas = document.createElement('canvas')
-        canvas.width = sizePx
-        canvas.height = sizePx
+        canvas.width = widthPx
+        canvas.height = heightPx
         const ctx = canvas.getContext('2d')
         if (!ctx) {
           URL.revokeObjectURL(url)
@@ -206,10 +208,10 @@ export class LineFollowerApp {
         
         // White background
         ctx.fillStyle = 'white'
-        ctx.fillRect(0, 0, sizePx, sizePx)
+        ctx.fillRect(0, 0, widthPx, heightPx)
         
         // Draw SVG
-        ctx.drawImage(img, 0, 0, sizePx, sizePx)
+        ctx.drawImage(img, 0, 0, widthPx, heightPx)
         
         URL.revokeObjectURL(url)
         resolve(canvas.toDataURL('image/png'))
@@ -231,15 +233,15 @@ export class LineFollowerApp {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = 'line-follower-board.svg'
+    link.download = `${this.getDownloadFilename()}.svg`
     link.click()
     URL.revokeObjectURL(url)
   }
 
   private generateSVG(): string {
-    // Full size: 48" x 48"
-    // Using inches directly with viewBox
-    const boardSize = BOARD_INCHES
+    // Using inches directly with viewBox - rectangular board support
+    const boardWidth = BOARD_WIDTH_INCHES
+    const boardHeight = BOARD_HEIGHT_INCHES
     const gridSpacing = GRID_SPACING_INCHES
     const lineWidth = LINE_WIDTH_INCHES
     
@@ -281,22 +283,22 @@ export class LineFollowerApp {
     const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" 
      xmlns:xlink="http://www.w3.org/1999/xlink"
-     width="${boardSize}in" 
-     height="${boardSize}in" 
-     viewBox="0 0 ${boardSize} ${boardSize}">
-  <!-- Line Follower Board - ${boardSize}" x ${boardSize}" at ${gridSpacing}" grid spacing -->
+     width="${boardWidth}in" 
+     height="${boardHeight}in" 
+     viewBox="0 0 ${boardWidth} ${boardHeight}">
+  <!-- Line Follower Board - ${boardWidth}" x ${boardHeight}" at ${gridSpacing}" grid spacing -->
   
   <!-- White background -->
-  <rect x="0" y="0" width="${boardSize}" height="${boardSize}" fill="white"/>
+  <rect x="0" y="0" width="${boardWidth}" height="${boardHeight}" fill="white"/>
   
   <!-- Border for scaling reference -->
-  <rect x="0" y="0" width="${boardSize}" height="${boardSize}" 
+  <rect x="0" y="0" width="${boardWidth}" height="${boardHeight}" 
         fill="none" stroke="black" stroke-width="0.05"/>
   
   <!-- Grid dots -->
   <g fill="#cccccc">
-${Array.from({ length: GRID_POINTS }, (_, y) =>
-  Array.from({ length: GRID_POINTS }, (_, x) =>
+${Array.from({ length: GRID_POINTS_Y }, (_, y) =>
+  Array.from({ length: GRID_POINTS_X }, (_, x) =>
     `    <circle cx="${x * gridSpacing}" cy="${y * gridSpacing}" r="0.04"/>`
   ).join('\n')
 ).join('\n')}
@@ -335,17 +337,17 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
           boxY = 0
           break
         case 'top-right':
-          boxX = (GRID_POINTS - 1) * gridSpacing - boxWidth
+          boxX = (GRID_POINTS_X - 1) * gridSpacing - boxWidth
           boxY = 0
           break
         case 'bottom-left':
           boxX = 0
-          boxY = (GRID_POINTS - 1) * gridSpacing - boxHeight
+          boxY = (GRID_POINTS_Y - 1) * gridSpacing - boxHeight
           break
         case 'bottom-right':
         default:
-          boxX = (GRID_POINTS - 1) * gridSpacing - boxWidth
-          boxY = (GRID_POINTS - 1) * gridSpacing - boxHeight
+          boxX = (GRID_POINTS_X - 1) * gridSpacing - boxWidth
+          boxY = (GRID_POINTS_Y - 1) * gridSpacing - boxHeight
           break
       }
     }
@@ -422,6 +424,29 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
 
   getTitle(): string {
     return this.title
+  }
+
+  private currentBoardSizeIndex = 2 // Default to 48" x 36"
+
+  setBoardSize(index: number) {
+    if (index < 0 || index >= BOARD_SIZES.length) return
+    this.currentBoardSizeIndex = index
+    setConfigBoardSize(index)
+    this.canvas.updateBoardSize()
+    this.render()
+  }
+
+  getBoardSizeIndex(): number {
+    return this.currentBoardSizeIndex
+  }
+
+  /**
+   * Get a sanitized filename for downloads based on the title
+   */
+  private getDownloadFilename(): string {
+    const name = this.title?.trim() || 'LineMat'
+    // Sanitize: remove characters that are problematic in filenames
+    return name.replace(/[<>:"/\\|?*]/g, '').replace(/\s+/g, '_')
   }
 
   /**

@@ -1,6 +1,6 @@
 import type { LineFollowerApp } from './app'
 import type { SelectionState, PointIconType } from './types'
-import { LOGO_URL, WEBSITE_URL, SLOGAN, TRACKING_PIXEL_URL, LEAGUE_LOGO_URL, VERSION } from './config'
+import { LOGO_URL, WEBSITE_URL, SLOGAN, TRACKING_PIXEL_URL, LEAGUE_LOGO_URL, VERSION, BOARD_SIZES, DEFAULT_BOARD_SIZE_INDEX } from './config'
 import helpContent from '../help.md?raw'
 import { marked } from 'marked'
 
@@ -24,7 +24,8 @@ export class UIController {
             <img class="brand-logo" src="https://images.jointheleague.org/logos/flag.png" alt="League logo" />
             <div>
               <div class="title">League Line Mat-O-Matic</div>
-              <div class="subtitle">48" board · 2" grid</div>
+              <select id="board-size-select" class="board-size-select">
+              </select>
             </div>
           </div>
           <div class="actions">
@@ -121,6 +122,7 @@ export class UIController {
 
     this.iconPopup = document.querySelector('#icon-popup')
     this.setupIconPopup()
+    this.setupBoardSizeSelect()
     this.bindEvents()
   }
 
@@ -164,6 +166,29 @@ export class UIController {
         this.hideIconPopup()
       }
     })
+  }
+
+  private setupBoardSizeSelect() {
+    const select = document.getElementById('board-size-select') as HTMLSelectElement
+    if (!select) return
+
+    // Populate options
+    select.innerHTML = BOARD_SIZES.map((size, index) => 
+      `<option value="${index}"${index === DEFAULT_BOARD_SIZE_INDEX ? ' selected' : ''}>${size.label}</option>`
+    ).join('')
+
+    // Handle change
+    select.addEventListener('change', () => {
+      const index = parseInt(select.value, 10)
+      this.app.setBoardSize(index)
+    })
+  }
+
+  setBoardSizeIndex(index: number) {
+    const select = document.getElementById('board-size-select') as HTMLSelectElement
+    if (select) {
+      select.value = String(index)
+    }
   }
 
   showIconPopup(x: number, y: number, currentIcon: PointIconType, onSelect: (icon: PointIconType) => void) {

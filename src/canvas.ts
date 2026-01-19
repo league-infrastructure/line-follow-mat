@@ -1,4 +1,4 @@
-import { GRID_POINTS, GRID_SPACING_INCHES, LINE_WIDTH_INCHES, LOGO_URL, WEBSITE_URL, SLOGAN, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT } from './config'
+import { GRID_POINTS, GRID_SPACING_INCHES, LINE_WIDTH_INCHES, LOGO_URL, WEBSITE_URL, SLOGAN, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT, GRID_POINTS_X, GRID_POINTS_Y, BOARD_WIDTH_INCHES, BOARD_HEIGHT_INCHES } from './config'
 import { GridPoint, Path, Point, SelectionState, Corner } from './types'
 import { drawArrowHead, drawSegmentLabel } from './paths'
 import { drawArc, calculateArcParams } from './arc-utils'
@@ -22,6 +22,8 @@ export class CanvasView {
   deviceScale = window.devicePixelRatio || 1
   private origin: Point = { x: 0, y: 0 }
   private gridSpacingPx = 24
+  private boardWidthPx = 0
+  private boardHeightPx = 0
   private boardPadding = 48
   private segments: DrawableSegment[] = []
   private lastSelection: SelectionState = { kind: 'none' }
@@ -208,8 +210,8 @@ export class CanvasView {
       const boxHeight = TITLE_BOX_HEIGHT * this.gridSpacingPx
       const minX = this.origin.x
       const minY = this.origin.y
-      const maxX = this.origin.x + (GRID_POINTS - 1) * this.gridSpacingPx - boxWidth
-      const maxY = this.origin.y + (GRID_POINTS - 1) * this.gridSpacingPx - boxHeight
+      const maxX = this.origin.x + (GRID_POINTS_X - 1) * this.gridSpacingPx - boxWidth
+      const maxY = this.origin.y + (GRID_POINTS_Y - 1) * this.gridSpacingPx - boxHeight
       
       this.legendDragPosition = {
         x: Math.max(minX, Math.min(maxX, newX)),
@@ -476,6 +478,11 @@ export class CanvasView {
     this.straightLineMode = mode
   }
 
+  updateBoardSize() {
+    // Force recalculation of grid dimensions
+    this.resizeToContainer()
+  }
+
   setPreviewTarget(point: GridPoint | null) {
     this.previewTarget = point
   }
@@ -499,11 +506,20 @@ export class CanvasView {
 
     const usableWidth = cssWidth - this.boardPadding * 2
     const usableHeight = cssHeight - this.boardPadding * 2
-    const boardSize = Math.min(usableWidth, usableHeight)
-    this.gridSpacingPx = boardSize / (GRID_POINTS - 1)
+    
+    // Calculate grid spacing to fit the board in the available space
+    // The board is (GRID_POINTS_X - 1) cells wide and (GRID_POINTS_Y - 1) cells tall
+    const scaleX = usableWidth / (GRID_POINTS_X - 1)
+    const scaleY = usableHeight / (GRID_POINTS_Y - 1)
+    this.gridSpacingPx = Math.min(scaleX, scaleY)
+    
+    // Calculate actual board dimensions in pixels
+    this.boardWidthPx = this.gridSpacingPx * (GRID_POINTS_X - 1)
+    this.boardHeightPx = this.gridSpacingPx * (GRID_POINTS_Y - 1)
+    
     this.origin = {
-      x: (cssWidth - boardSize) / 2,
-      y: (cssHeight - boardSize) / 2
+      x: (cssWidth - this.boardWidthPx) / 2,
+      y: (cssHeight - this.boardHeightPx) / 2
     }
   }
 
@@ -512,12 +528,11 @@ export class CanvasView {
     this.ctx.fillStyle = '#fdfbf7'
     this.ctx.fillRect(0, 0, this.canvas.width / this.deviceScale, this.canvas.height / this.deviceScale)
 
-    const boardWidth = this.gridSpacingPx * (GRID_POINTS - 1)
     this.ctx.fillStyle = '#ffffff'
     this.ctx.strokeStyle = '#e2e2e2'
     this.ctx.lineWidth = 1
     this.ctx.beginPath()
-    this.ctx.rect(this.origin.x, this.origin.y, boardWidth, boardWidth)
+    this.ctx.rect(this.origin.x, this.origin.y, this.boardWidthPx, this.boardHeightPx)
     this.ctx.fill()
     this.ctx.stroke()
   }
@@ -526,25 +541,28 @@ export class CanvasView {
     if (!this.ctx) return
     this.ctx.strokeStyle = '#e5e5ea'
     this.ctx.lineWidth = 1
-    const size = this.gridSpacingPx * (GRID_POINTS - 1)
 
-    for (let i = 0; i < GRID_POINTS; i++) {
-      const offset = this.origin.x + i * this.gridSpacingPx
+    // Horizontal lines
+    for (let y = 0; y < GRID_POINTS_Y; y++) {
       this.ctx.beginPath()
-      this.ctx.moveTo(this.origin.x, this.origin.y + i * this.gridSpacingPx)
-      this.ctx.lineTo(this.origin.x + size, this.origin.y + i * this.gridSpacingPx)
+      this.ctx.moveTo(this.origin.x, this.origin.y + y * this.gridSpacingPx)
+      this.ctx.lineTo(this.origin.x + this.boardWidthPx, this.origin.y + y * this.gridSpacingPx)
       this.ctx.stroke()
+    }
 
+    // Vertical lines
+    for (let x = 0; x < GRID_POINTS_X; x++) {
+      const offset = this.origin.x + x * this.gridSpacingPx
       this.ctx.beginPath()
       this.ctx.moveTo(offset, this.origin.y)
-      this.ctx.lineTo(offset, this.origin.y + size)
+      this.ctx.lineTo(offset, this.origin.y + this.boardHeightPx)
       this.ctx.stroke()
     }
 
     // Points
     this.ctx.fillStyle = '#cbd2d9'
-    for (let y = 0; y < GRID_POINTS; y++) {
-      for (let x = 0; x < GRID_POINTS; x++) {
+    for (let y = 0; y < GRID_POINTS_Y; y++) {
+      for (let x = 0; x < GRID_POINTS_X; x++) {
         const p = this.toCanvasPoint({ x, y })
         this.ctx.beginPath()
         this.ctx.arc(p.x, p.y, 3, 0, Math.PI * 2)

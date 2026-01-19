@@ -76,6 +76,30 @@ body {
   color: #cbd5e1;
 }
 
+.board-size-select {
+  font-size: 13px;
+  color: #cbd5e1;
+  background: transparent;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  outline: none;
+}
+
+.board-size-select:hover {
+  border-color: #475569;
+}
+
+.board-size-select:focus {
+  border-color: #3b82f6;
+}
+
+.board-size-select option {
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
 .actions {
   display: flex;
   gap: 10px;

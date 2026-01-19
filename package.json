@@ -1,7 +1,7 @@
 {
   "name": "linefollow",
   "private": true,
-  "version": "1.20260119.4",
+  "version": "1.20260119.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
