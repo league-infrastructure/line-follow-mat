@@ -4,6 +4,19 @@ import { createCanvas } from 'canvas'
 import { drawArc, calculateArcParams } from './arc-utils'
 import { buildSegments } from './segment-builder'
 
+// UUID generator that works in non-secure contexts
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  // Fallback for http:// contexts
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0
+    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+    return v.toString(16)
+  })
+}
+
 // Type definitions for canvas operations
 interface CanvasPoint {
   x: number
@@ -95,7 +108,7 @@ export function decodeDesignFromUrl(encoded: string): Path[] {
     }
     
     if (points.length >= 2) {
-      paths.push({ id: crypto.randomUUID(), points, icons })
+      paths.push({ id: generateId(), points, icons })
     }
   }
 

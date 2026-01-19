@@ -7,6 +7,19 @@ import { calculateArcParams } from './arc-utils'
 
 type Endpoint = 'start' | 'end'
 
+// UUID generator that works in non-secure contexts
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  // Fallback for http:// contexts
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0
+    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+    return v.toString(16)
+  })
+}
+
 // Base62 encoding utilities
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 const pointToIndex = (pt: GridPoint): number => pt.y * GRID_POINTS + pt.x
@@ -465,9 +478,9 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
     if (!this.canvas['canvas']) return
     const canvasEl = this.canvas['canvas'] as HTMLCanvasElement
     
-    canvasEl.addEventListener('mousedown', (e) => this.handleMouseDown(e))
-    canvasEl.addEventListener('mousemove', (e) => this.handleMouseMove(e))
-    canvasEl.addEventListener('mouseup', () => this.handleMouseUp())
+    canvasEl.addEventListener('pointerdown', (e) => this.handleMouseDown(e))
+    canvasEl.addEventListener('pointermove', (e) => this.handleMouseMove(e))
+    canvasEl.addEventListener('pointerup', () => this.handleMouseUp())
     canvasEl.addEventListener('contextmenu', (e) => this.handleContextMenu(e))
   }
 
@@ -515,7 +528,7 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
     this.render()
   }
 
-  private handleMouseDown(e: MouseEvent) {
+  private handleMouseDown(e: PointerEvent) {
     const rect = (this.canvas['canvas'] as HTMLCanvasElement).getBoundingClientRect()
     const x = (e.clientX - rect.left) * (this.canvas['deviceScale'] || 1)
     const y = (e.clientY - rect.top) * (this.canvas['deviceScale'] || 1)
@@ -549,7 +562,7 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
     }
   }
 
-  private handleMouseMove(e: MouseEvent) {
+  private handleMouseMove(e: PointerEvent) {
     const rect = (this.canvas['canvas'] as HTMLCanvasElement).getBoundingClientRect()
     const x = (e.clientX - rect.left) * (this.canvas['deviceScale'] || 1)
     const y = (e.clientY - rect.top) * (this.canvas['deviceScale'] || 1)
@@ -629,7 +642,7 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
   private handlePointClick(point: GridPoint) {
     if (this.selection.kind === 'floating-point') {
       const newPath: Path = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         points: [this.selection.point, point]
       }
       this.paths.push(newPath)
@@ -759,10 +772,10 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
 
     const updated: Path[] = []
     if (left.length >= 2) {
-      updated.push({ id: crypto.randomUUID(), points: left })
+      updated.push({ id: generateId(), points: left })
     }
     if (right.length >= 2) {
-      updated.push({ id: crypto.randomUUID(), points: right })
+      updated.push({ id: generateId(), points: right })
     }
 
     this.paths = this.paths.filter((p) => p.id !== pathId).concat(updated)
@@ -904,7 +917,7 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
         }
         
         if (points.length >= 2) {
-          paths.push({ id: crypto.randomUUID(), points, icons })
+          paths.push({ id: generateId(), points, icons })
         }
       }
 

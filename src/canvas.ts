@@ -29,6 +29,13 @@ export class CanvasView {
   private previewTarget: GridPoint | null = null
   private suppressNextClick = false
   private buildingPath = false
+  
+  // Pointer state for reliable click detection
+  private pointerDownPos: { x: number; y: number } | null = null
+  private pointerDownTime = 0
+  private pointerMaxDist = 0  // Track max distance moved during pointer session
+  private clickProcessedByPointerUp = false  // Prevent double-processing with click fallback
+  
   private titleBoxCorner: Corner = 'bottom-right'
   private logoImage: HTMLImageElement | null = null
   private qrImage: HTMLImageElement | null = null
@@ -122,11 +129,12 @@ export class CanvasView {
     this.resizeToContainer()
 
     window.addEventListener('resize', () => this.handleResize())
-    canvasEl.addEventListener('click', (ev) => this.handleClick(ev))
-    canvasEl.addEventListener('mousedown', (ev) => this.handleLegendDragStart(ev))
-    canvasEl.addEventListener('mousemove', (ev) => this.handleLegendDragMove(ev))
-    canvasEl.addEventListener('mouseup', () => this.handleLegendDragEnd())
-    canvasEl.addEventListener('mouseleave', () => this.handleLegendDragEnd())
+    canvasEl.addEventListener('pointerdown', (ev) => this.handlePointerDown(ev))
+    canvasEl.addEventListener('pointerup', (ev) => this.handlePointerUp(ev))
+    canvasEl.addEventListener('pointermove', (ev) => this.handlePointerMove(ev))
+    canvasEl.addEventListener('pointerleave', () => this.handlePointerLeave())
+    // Also listen for click as fallback for devices where pointer events don't work well
+    canvasEl.addEventListener('click', (ev) => this.handleClickFallback(ev))
     
     // Re-render after layout is complete to handle cases where
     // CSS hasn't finished computing dimensions
@@ -150,12 +158,18 @@ export class CanvasView {
            cssY <= this.legendBounds.y + this.legendBounds.height
   }
 
-  private handleLegendDragStart(ev: MouseEvent) {
+  private handlePointerDown(ev: PointerEvent) {
     if (!this.canvas) return
     const rect = this.canvas.getBoundingClientRect()
     const x = (ev.clientX - rect.left) * this.deviceScale
     const y = (ev.clientY - rect.top) * this.deviceScale
     
+    // Store position and time for click detection
+    this.pointerDownPos = { x, y }
+    this.pointerDownTime = Date.now()
+    this.pointerMaxDist = 0
+    
+    // Check if starting a legend drag
     if (this.isPointInLegend(x, y) && this.legendBounds) {
       this.draggingLegend = true
       this.legendDragOffset = {
@@ -166,43 +180,137 @@ export class CanvasView {
     }
   }
 
-  private handleLegendDragMove(ev: MouseEvent) {
+  private handlePointerMove(ev: PointerEvent) {
     if (!this.canvas) return
     const rect = this.canvas.getBoundingClientRect()
     const x = (ev.clientX - rect.left) * this.deviceScale
     const y = (ev.clientY - rect.top) * this.deviceScale
     
+    // Track maximum distance from pointer down position (for click detection)
+    if (this.pointerDownPos) {
+      const dist = Math.hypot(x - this.pointerDownPos.x, y - this.pointerDownPos.y)
+      this.pointerMaxDist = Math.max(this.pointerMaxDist, dist)
+    }
+    
     // Update cursor when hovering over legend
     if (!this.draggingLegend) {
       this.canvas.style.cursor = this.isPointInLegend(x, y) ? 'grab' : 'default'
-      return
     }
     
-    // Calculate new pixel position while dragging (follows cursor smoothly)
-    const newX = x / this.deviceScale - this.legendDragOffset.x
-    const newY = y / this.deviceScale - this.legendDragOffset.y
-    
-    // Clamp to board bounds
-    const boxWidth = TITLE_BOX_WIDTH * this.gridSpacingPx
-    const boxHeight = TITLE_BOX_HEIGHT * this.gridSpacingPx
-    const minX = this.origin.x
-    const minY = this.origin.y
-    const maxX = this.origin.x + (GRID_POINTS - 1) * this.gridSpacingPx - boxWidth
-    const maxY = this.origin.y + (GRID_POINTS - 1) * this.gridSpacingPx - boxHeight
-    
-    this.legendDragPosition = {
-      x: Math.max(minX, Math.min(maxX, newX)),
-      y: Math.max(minY, Math.min(maxY, newY))
-    }
-    
-    // Trigger re-render to show legend at new position
-    if (this.renderCallback) {
-      this.renderCallback()
+    // If dragging legend, handle that
+    if (this.draggingLegend) {
+      // Calculate new pixel position while dragging (follows cursor smoothly)
+      const newX = x / this.deviceScale - this.legendDragOffset.x
+      const newY = y / this.deviceScale - this.legendDragOffset.y
+      
+      // Clamp to board bounds
+      const boxWidth = TITLE_BOX_WIDTH * this.gridSpacingPx
+      const boxHeight = TITLE_BOX_HEIGHT * this.gridSpacingPx
+      const minX = this.origin.x
+      const minY = this.origin.y
+      const maxX = this.origin.x + (GRID_POINTS - 1) * this.gridSpacingPx - boxWidth
+      const maxY = this.origin.y + (GRID_POINTS - 1) * this.gridSpacingPx - boxHeight
+      
+      this.legendDragPosition = {
+        x: Math.max(minX, Math.min(maxX, newX)),
+        y: Math.max(minY, Math.min(maxY, newY))
+      }
+      
+      // Trigger re-render to show legend at new position
+      if (this.renderCallback) {
+        this.renderCallback()
+      }
     }
   }
 
-  private handleLegendDragEnd() {
+  private handlePointerUp(ev: PointerEvent) {
     if (!this.canvas) return
+    
+    // Reset flag at start to prevent stale state from previous interactions
+    this.clickProcessedByPointerUp = false
+    
+    const rect = this.canvas.getBoundingClientRect()
+    const x = (ev.clientX - rect.left) * this.deviceScale
+    const y = (ev.clientY - rect.top) * this.deviceScale
+    
+    // Handle legend drag end
+    if (this.draggingLegend && this.legendDragPosition) {
+      // Snap to grid on drop
+      const gridX = Math.round((this.legendDragPosition.x - this.origin.x) / this.gridSpacingPx)
+      const gridY = Math.round((this.legendDragPosition.y - this.origin.y) / this.gridSpacingPx)
+      
+      // Clamp to valid range
+      const maxX = GRID_POINTS - 1 - TITLE_BOX_WIDTH
+      const maxY = GRID_POINTS - 1 - TITLE_BOX_HEIGHT
+      const clampedX = Math.max(0, Math.min(maxX, gridX))
+      const clampedY = Math.max(0, Math.min(maxY, gridY))
+      
+      this.legendPosition = { x: clampedX, y: clampedY }
+      this.legendManuallyPositioned = true
+      this.legendDragPosition = null
+      
+      if (this.onLegendMoved) {
+        this.onLegendMoved(this.legendPosition)
+      }
+      
+      this.draggingLegend = false
+      this.canvas.style.cursor = 'default'
+      this.pointerDownPos = null
+      // Don't set clickProcessedByPointerUp here - let fallback handle clicks on legend
+      return
+    }
+    
+    this.draggingLegend = false
+    this.canvas.style.cursor = 'default'
+    
+    // Process click if we had a pointer down
+    // Remove distance threshold - trackpads can report significant movement during taps
+    // Only use time threshold to distinguish clicks from long presses
+    if (this.pointerDownPos) {
+      const elapsed = Date.now() - this.pointerDownTime
+      
+      // Consider it a click if time < 500ms (reasonable click duration)
+      if (elapsed < 500) {
+        this.processClick(x, y)
+        this.clickProcessedByPointerUp = true
+      }
+    }
+    
+    this.pointerDownPos = null
+  }
+
+  // Fallback click handler for devices where pointerup doesn't work reliably
+  private handleClickFallback(event: MouseEvent) {
+    if (!this.canvas) return
+    
+    // Skip if already processed by pointerup
+    if (this.clickProcessedByPointerUp) {
+      this.clickProcessedByPointerUp = false
+      return
+    }
+    
+    // Skip if suppressed
+    if (this.suppressNextClick) {
+      this.suppressNextClick = false
+      return
+    }
+    
+    const rect = this.canvas.getBoundingClientRect()
+    const x = (event.clientX - rect.left) * this.deviceScale
+    const y = (event.clientY - rect.top) * this.deviceScale
+    
+    // Skip if on legend
+    if (this.isPointInLegend(x, y)) {
+      return
+    }
+    
+    this.processClick(x, y)
+  }
+
+  private handlePointerLeave() {
+    if (!this.canvas) return
+    
+    // End legend drag if we leave the canvas
     if (this.draggingLegend && this.legendDragPosition) {
       // Snap to grid on drop
       const gridX = Math.round((this.legendDragPosition.x - this.origin.x) / this.gridSpacingPx)
@@ -222,8 +330,49 @@ export class CanvasView {
         this.onLegendMoved(this.legendPosition)
       }
     }
+    
     this.draggingLegend = false
+    this.pointerDownPos = null
     this.canvas.style.cursor = 'default'
+  }
+
+  private processClick(x: number, y: number) {
+    // If click was suppressed (e.g., point was clicked in app.ts), skip processing
+    if (this.suppressNextClick) {
+      this.suppressNextClick = false
+      return
+    }
+
+    // Ignore clicks on the legend (handled by drag)
+    if (this.isPointInLegend(x, y)) {
+      return
+    }
+
+    // When building a path, check grid points FIRST so we can close loops
+    if (this.buildingPath) {
+      const pointHit = this.pickGridPoint(x, y)
+      if (pointHit) {
+        this.callbacks.onPoint(pointHit)
+        return
+      }
+    }
+
+    // Check for segment hit - prioritize selecting existing paths over creating new points
+    // This makes it much easier to click on segments without accidentally creating new points
+    const segmentHit = this.pickSegment(x, y)
+    if (segmentHit) {
+      this.callbacks.onSegment(segmentHit)
+      return
+    }
+
+    // Check for grid point if no segment was clicked
+    const pointHit = this.pickGridPoint(x, y)
+    if (pointHit) {
+      this.callbacks.onPoint(pointHit)
+      return
+    }
+
+    this.callbacks.onBackground()
   }
 
   // Call this to prevent the next click from being processed
@@ -356,51 +505,6 @@ export class CanvasView {
       x: (cssWidth - boardSize) / 2,
       y: (cssHeight - boardSize) / 2
     }
-  }
-
-  private handleClick(event: MouseEvent) {
-    if (!this.canvas) return
-
-    // If click was suppressed (e.g., point was clicked in app.ts), skip processing
-    if (this.suppressNextClick) {
-      this.suppressNextClick = false
-      return
-    }
-
-    const rect = this.canvas.getBoundingClientRect()
-    const x = (event.clientX - rect.left) * this.deviceScale
-    const y = (event.clientY - rect.top) * this.deviceScale
-
-    // Ignore clicks on the legend (handled by drag)
-    if (this.isPointInLegend(x, y)) {
-      return
-    }
-
-    // When building a path, check grid points FIRST so we can close loops
-    if (this.buildingPath) {
-      const pointHit = this.pickGridPoint(x, y)
-      if (pointHit) {
-        this.callbacks.onPoint(pointHit)
-        return
-      }
-    }
-
-    // Check for segment hit - prioritize selecting existing paths over creating new points
-    // This makes it much easier to click on segments without accidentally creating new points
-    const segmentHit = this.pickSegment(x, y)
-    if (segmentHit) {
-      this.callbacks.onSegment(segmentHit)
-      return
-    }
-
-    // Check for grid point if no segment was clicked
-    const pointHit = this.pickGridPoint(x, y)
-    if (pointHit) {
-      this.callbacks.onPoint(pointHit)
-      return
-    }
-
-    this.callbacks.onBackground()
   }
 
   private paintBackground() {
