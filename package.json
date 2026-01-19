@@ -10,7 +10,8 @@
     "test": "tsx test/render-test.ts"
   },
   "dependencies": {
-    "jspdf": "^2.5.1"
+    "jspdf": "^2.5.1",
+    "marked": "^17.0.1"
   },
   "devDependencies": {
     "@types/node": "^25.0.9",

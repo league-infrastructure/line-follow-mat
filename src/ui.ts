@@ -1,6 +1,8 @@
 import type { LineFollowerApp } from './app'
 import type { SelectionState, PointIconType } from './types'
 import { LOGO_URL, WEBSITE_URL, SLOGAN } from './config'
+import helpContent from '../help.md?raw'
+import { marked } from 'marked'
 
 export class UIController {
   private app: LineFollowerApp
@@ -31,6 +33,7 @@ export class UIController {
             <button id="pdf-btn" class="btn ghost">PDF</button>
             <button id="png-btn" class="btn ghost">PNG</button>
             <button id="svg-btn" class="btn ghost">SVG</button>
+            <button id="help-btn" class="btn ghost">Help</button>
           </div>
         </header>
 
@@ -83,6 +86,18 @@ export class UIController {
             <div id="icon-popup" class="icon-popup"></div>
           </section>
         </main>
+        
+        <div id="help-modal" class="modal hidden">
+          <div class="modal-backdrop"></div>
+          <div class="modal-content">
+            <button class="modal-close" aria-label="Close">&times;</button>
+            <div class="modal-body help-content">
+              ${marked(helpContent)}
+            </div>
+          </div>
+        </div>
+        
+        <div id="toast" class="toast hidden"></div>
       </div>
     `
 
@@ -249,6 +264,7 @@ export class UIController {
 
     document.getElementById('share-btn')?.addEventListener('click', () => {
       this.app.shareDesign()
+      this.showToast('URL updated! Copy or bookmark it to save your design.')
     })
 
     document.getElementById('pdf-btn')?.addEventListener('click', () => {
@@ -261,6 +277,23 @@ export class UIController {
 
     document.getElementById('svg-btn')?.addEventListener('click', () => {
       this.app.downloadSVG()
+    })
+
+    // Help modal
+    const helpModal = document.getElementById('help-modal')
+    document.getElementById('help-btn')?.addEventListener('click', () => {
+      helpModal?.classList.remove('hidden')
+    })
+    helpModal?.querySelector('.modal-close')?.addEventListener('click', () => {
+      helpModal?.classList.add('hidden')
+    })
+    helpModal?.querySelector('.modal-backdrop')?.addEventListener('click', () => {
+      helpModal?.classList.add('hidden')
+    })
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !helpModal?.classList.contains('hidden')) {
+        helpModal?.classList.add('hidden')
+      }
     })
 
     document.getElementById('board-title')?.addEventListener('input', (e) => {
@@ -283,5 +316,18 @@ export class UIController {
       const input = e.target as HTMLInputElement
       this.app.setSlogan(input.value || SLOGAN)
     })
+  }
+
+  private showToast(message: string) {
+    const toast = document.getElementById('toast')
+    if (!toast) return
+    
+    toast.textContent = message
+    toast.classList.remove('hidden')
+    
+    // Auto-hide after 4 seconds
+    setTimeout(() => {
+      toast.classList.add('hidden')
+    }, 4000)
   }
 }
