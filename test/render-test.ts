@@ -1,10 +1,12 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import { fileURLToPath } from 'url'
 import { dirname } from 'path'
 import { parse as parseYaml } from 'yaml'
 import { decodeDesignFromUrl, extractDesignFromUrl, generateNetlist, renderPathsCurvedToCanvas, canvasToBuffer } from '../src/paths.js'
 import { createCanvas, Image } from 'canvas'
+import pixelmatch from 'pixelmatch'
+import { PNG } from 'pngjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -18,6 +20,17 @@ interface TestResult {
   test: TestConfig
   straightImagePath: string
   curvedImagePath: string
+  netlistPath: string
+}
+
+interface ComparisonResult {
+  testName: string
+  file: string
+  type: 'txt' | 'png'
+  passed: boolean
+  error?: string
+  diffPixels?: number
+  totalPixels?: number
 }
 
 /**
