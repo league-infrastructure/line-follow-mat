@@ -11,10 +11,13 @@
   },
   "dependencies": {
     "jspdf": "^2.5.1",
-    "marked": "^17.0.1"
+    "marked": "^17.0.1",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.0.9",
+    "@types/pngjs": "^6.0.5",
     "canvas": "^3.2.1",
     "tsx": "^4.21.0",
     "typescript": "^5.3.3",

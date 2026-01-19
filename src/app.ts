@@ -6,6 +6,15 @@ import { buildSegments } from './segment-builder'
 import { calculateArcParams } from './arc-utils'
 // import { generateMaze } from './maze'
 
+// Umami analytics type declaration
+declare global {
+  interface Window {
+    umami?: {
+      track: (event: string, data?: Record<string, string | number>) => void
+    }
+  }
+}
+
 type Endpoint = 'start' | 'end'
 
 // UUID generator that works in non-secure contexts
@@ -82,6 +91,9 @@ export class LineFollowerApp {
     window.addEventListener('load', () => this.render())
     // Also use requestAnimationFrame as a backup
     requestAnimationFrame(() => this.render())
+    
+    // Track visit event with current URL (including design state)
+    this.trackEvent('visit', { url: this.getShareUrl() })
   }
 
   // Branding setters
@@ -126,6 +138,9 @@ export class LineFollowerApp {
   }
 
   async downloadPDF() {
+    // Track download event
+    this.trackEvent('download', { type: 'pdf', url: this.getShareUrl() })
+    
     // Create high-res canvas from SVG for 48"x48" at 150 DPI
     const dpi = 150
     const sizeInches = BOARD_INCHES
@@ -156,6 +171,9 @@ export class LineFollowerApp {
   }
 
   async downloadPNG() {
+    // Track download event
+    this.trackEvent('download', { type: 'png', url: this.getShareUrl() })
+    
     // Render at 150 DPI for 48"x48" = 7200x7200 pixels
     const dpi = 150
     const sizePx = BOARD_INCHES * dpi  // 7200px
@@ -205,6 +223,9 @@ export class LineFollowerApp {
   }
 
   downloadSVG() {
+    // Track download event
+    this.trackEvent('download', { type: 'svg', url: this.getShareUrl() })
+    
     const svg = this.generateSVG()
     const blob = new Blob([svg], { type: 'image/svg+xml' })
     const url = URL.createObjectURL(blob)
@@ -403,7 +424,10 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
     return this.title
   }
 
-  shareDesign() {
+  /**
+   * Get the full shareable URL for the current design state
+   */
+  private getShareUrl(): string {
     const encoded = this.encodeDesign()
     const params = new URLSearchParams()
     params.set('g', encoded)
@@ -425,10 +449,26 @@ ${Array.from({ length: GRID_POINTS }, (_, y) =>
     if (this.customSlogan) {
       params.set('s', this.customSlogan)
     }
-    const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`
-    const newUrl = `${window.location.pathname}?${params.toString()}`
+    return `${window.location.origin}${window.location.pathname}?${params.toString()}`
+  }
+
+  /**
+   * Track an analytics event via Umami
+   */
+  private trackEvent(event: string, data?: Record<string, string | number>) {
+    if (window.umami) {
+      window.umami.track(event, data)
+    }
+  }
+
+  shareDesign() {
+    const url = this.getShareUrl()
+    const newUrl = `${window.location.pathname}?${new URL(url).search}`
     window.history.replaceState({}, '', newUrl)
     navigator.clipboard.writeText(url)
+    
+    // Track share event
+    this.trackEvent('share', { url })
   }
 
   loadDesign(encoded: string) {

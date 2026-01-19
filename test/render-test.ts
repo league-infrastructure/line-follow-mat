@@ -5,7 +5,6 @@ import { dirname } from 'path'
 import { parse as parseYaml } from 'yaml'
 import { decodeDesignFromUrl, extractDesignFromUrl, generateNetlist, renderPathsCurvedToCanvas, canvasToBuffer } from '../src/paths.js'
 import { createCanvas, Image } from 'canvas'
-import pixelmatch from 'pixelmatch'
 import { PNG } from 'pngjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -94,7 +93,6 @@ function processTest(test: TestConfig): TestResult | null {
   
   const netlistPath = join(outputDir, `${test.name}.txt`)
   writeFileSync(netlistPath, netlist)
-  console.log(`  netlist written to: ${netlistPath}`)
 
   // Color options for test images
   const testColors = {
@@ -197,3 +195,131 @@ if (results.length > 0) {
   console.log(`  composite image written to: ${compositePath}`)
 }
 
+// Compare output files against known-good files
+console.log('\n# Comparing against known-good files...')
+
+const knownGoodDir = join(__dirname, 'known-good')
+const outputDir = join(__dirname, 'output')
+
+interface ComparisonSummary {
+  passed: number
+  failed: number
+  skipped: number
+  failures: string[]
+}
+
+const summary: ComparisonSummary = {
+  passed: 0,
+  failed: 0,
+  skipped: 0,
+  failures: []
+}
+
+/**
+ * Compare two text files
+ */
+function compareTextFiles(testName: string, outputPath: string, knownGoodPath: string): void {
+  if (!existsSync(knownGoodPath)) {
+    summary.skipped++
+    return
+  }
+  
+  const outputContent = readFileSync(outputPath, 'utf-8')
+  const knownGoodContent = readFileSync(knownGoodPath, 'utf-8')
+  
+  if (outputContent === knownGoodContent) {
+    summary.passed++
+  } else {
+    summary.failed++
+    const outputLines = outputContent.split('\n')
+    const knownGoodLines = knownGoodContent.split('\n')
+    const diffs: string[] = []
+    
+    const maxLines = Math.max(outputLines.length, knownGoodLines.length)
+    for (let i = 0; i < maxLines && diffs.length < 5; i++) {
+      if (outputLines[i] !== knownGoodLines[i]) {
+        diffs.push(`    Line ${i + 1}: expected "${knownGoodLines[i] ?? '(missing)'}" got "${outputLines[i] ?? '(missing)'}"`)
+      }
+    }
+    summary.failures.push(`  ${testName}.txt:\n${diffs.join('\n')}`)
+  }
+}
+
+/**
+ * Compare two PNG files by converting to black/white and computing difference
+ */
+function comparePngFiles(testName: string, outputPath: string, knownGoodPath: string): void {
+  if (!existsSync(knownGoodPath)) {
+    summary.skipped++
+    return
+  }
+  
+  try {
+    const outputPng = PNG.sync.read(readFileSync(outputPath))
+    const knownGoodPng = PNG.sync.read(readFileSync(knownGoodPath))
+    
+    if (outputPng.width !== knownGoodPng.width || outputPng.height !== knownGoodPng.height) {
+      summary.failed++
+      summary.failures.push(`  ${testName}-curve.png: Size mismatch - output ${outputPng.width}x${outputPng.height} vs known-good ${knownGoodPng.width}x${knownGoodPng.height}`)
+      return
+    }
+    
+    const { width, height } = outputPng
+    const totalPixels = width * height
+    
+    // Convert to B/W and compute difference
+    // A pixel is "black" if it's not white (background)
+    let diffSum = 0
+    for (let i = 0; i < totalPixels; i++) {
+      const idx = i * 4
+      // Check if pixel is white (background) - R,G,B all > 250
+      const outIsWhite = outputPng.data[idx] > 250 && outputPng.data[idx + 1] > 250 && outputPng.data[idx + 2] > 250
+      const knownIsWhite = knownGoodPng.data[idx] > 250 && knownGoodPng.data[idx + 1] > 250 && knownGoodPng.data[idx + 2] > 250
+      
+      // If one is white and other isn't, that's a difference
+      if (outIsWhite !== knownIsWhite) {
+        diffSum++
+      }
+    }
+    
+    const diffPct = (diffSum / totalPixels) * 100
+    
+    // Allow up to 0.5% difference for anti-aliasing
+    if (diffPct < 0.5) {
+      summary.passed++
+    } else {
+      summary.failed++
+      summary.failures.push(`  ${testName}-curve.png: ${diffSum} pixels differ (${diffPct.toFixed(2)}%)`)
+    }
+  } catch (err) {
+    summary.failed++
+    summary.failures.push(`  ${testName}-curve.png: Error comparing - ${err}`)
+  }
+}
+
+// Compare each test result
+for (const result of results) {
+  const testName = result.test.name
+  
+  // Compare netlist (.txt)
+  compareTextFiles(testName, join(outputDir, `${testName}.txt`), join(knownGoodDir, `${testName}.txt`))
+  
+  // Compare curved image (-curve.png)
+  comparePngFiles(testName, join(outputDir, `${testName}-curve.png`), join(knownGoodDir, `${testName}-curve.png`))
+}
+
+// Report results
+console.log(`\n# Comparison Summary`)
+console.log(`  Passed: ${summary.passed}`)
+console.log(`  Failed: ${summary.failed}`)
+console.log(`  Skipped (no known-good): ${summary.skipped}`)
+
+if (summary.failures.length > 0) {
+  console.log(`\n# Failures:`)
+  for (const failure of summary.failures) {
+    console.log(failure)
+  }
+  process.exit(1)
+} else {
+  console.log(`\n# All comparisons passed!`)
+}
