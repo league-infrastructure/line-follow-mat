@@ -43,4 +43,5 @@ tests:
   - name: with_icons
     url: http://localhost:5173/?g=00011G1F1E!0P3S5O
 
-  
+  - name: Doodle_Track
+    url: http://localhost:5173/?g=0o0q0u1K1i1f232T2c3S%2C1C18141S1s1y2O2m2f333r4f535R6F6d6D5n4y4b4d4F3R302w2s2q3E3d4R636T6V6X6b717R736f6g768i96928s%2C7D6p7F7d7D786i5u5U543r%2C5K5k5M4w5K5i5g5G4S44463i3J2u%2C7G7M7m8c94&t=Doodle+Track

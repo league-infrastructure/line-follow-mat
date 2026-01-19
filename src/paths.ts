@@ -392,14 +392,18 @@ export function generateNetlist(paths: Path[]): string {
 
 /**
  * Extract the encoded design string from a URL
+ * Note: This decodes URL-encoded characters (like %2C -> ,) to match
+ * what the web app gets from URLSearchParams.get()
  */
 export function extractDesignFromUrl(url: string): string | null {
+  let encoded: string | null = null
   if (url.includes('?g=')) {
-    return url.split('?g=')[1].split('&')[0]
+    encoded = url.split('?g=')[1].split('&')[0]
   } else if (url.includes('g=')) {
-    return url.split('g=')[1].split('&')[0]
+    encoded = url.split('g=')[1].split('&')[0]
   }
-  return null
+  // URL-decode the value to match URLSearchParams.get() behavior
+  return encoded ? decodeURIComponent(encoded) : null
 }
 
 /**
