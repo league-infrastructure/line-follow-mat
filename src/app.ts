@@ -4,7 +4,6 @@ import { GridPoint, Path, SelectionState } from './types'
 import { GRID_SPACING_INCHES, GRID_POINTS, LINE_WIDTH_INCHES, TITLE_BOX_WIDTH, TITLE_BOX_HEIGHT, WEBSITE_URL, SLOGAN, LOGO_URL, BOARD_WIDTH_INCHES, BOARD_HEIGHT_INCHES, GRID_POINTS_X, GRID_POINTS_Y, setBoardSize as setConfigBoardSize, setCustomBoardSize as setCustomBoardSizeConfig, BOARD_SIZES } from './config'
 import { buildSegments } from './segment-builder'
 import { calculateArcParams } from './arc-utils'
-// import { generateMaze } from './maze'
 
 // Umami analytics type declaration
 declare global {
