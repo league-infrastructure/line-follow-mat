@@ -17,6 +17,7 @@ export const BOARD_SIZES: BoardSize[] = [
   { label: '36" × 24" · 2" grid', width: 36, height: 24, gridSpacing: 2 },
   { label: '48" × 36" · 2" grid', width: 48, height: 36, gridSpacing: 2 },
   { label: '48" × 48" · 2" grid', width: 48, height: 48, gridSpacing: 2 },
+  { label: '36" × 60" · 2" grid (3 ft × 5 ft)', width: 36, height: 60, gridSpacing: 2 },
 ]
 
 // Default board size index
